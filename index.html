@@ -1,0 +1,83 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Pocket Player">
+<meta name="theme-color" content="#08070c">
+<link rel="manifest" href="manifest.json">
+<link rel="apple-touch-icon" href="icon-180.png">
+<link rel="icon" type="image/png" sizes="192x192" href="icon-192.png">
+<title>Pocket Player — offline web-game player</title>
+<style>
+  :root{ --bg:#08070c; --panel:#120d1c; --edge:#2a2140; --ink:#c9bfd6; --dim:#8a7f9e; --gold:#d0a84e; --good:#6fbf6a; --bad:#c05070; }
+  *{ box-sizing:border-box; margin:0; padding:0 }
+  body{ background:var(--bg); color:var(--ink); font-family:Georgia,'Times New Roman',serif;
+    min-height:100vh; display:flex; align-items:center; justify-content:center; padding:20px;
+    padding-top:calc(20px + env(safe-area-inset-top)); }
+  .card{ width:100%; max-width:460px; background:var(--panel); border:1px solid var(--edge);
+    border-radius:8px; padding:26px 22px; box-shadow:0 12px 40px rgba(0,0,0,.6) }
+  h1{ color:var(--gold); font-size:26px; letter-spacing:4px; text-align:center; text-transform:uppercase;
+    text-shadow:0 0 12px rgba(208,168,78,.3) }
+  .sub{ text-align:center; color:var(--dim); font-size:12px; letter-spacing:2px; margin:6px 0 22px }
+  .box{ border:1px solid var(--edge); border-radius:6px; padding:14px; margin-bottom:14px; background:#0c0914 }
+  .box h2{ font-size:13px; color:var(--gold); letter-spacing:1px; text-transform:uppercase; margin-bottom:6px }
+  .box p{ font-size:13px; color:var(--dim); line-height:1.5 }
+  .gname{ color:var(--ink); font-size:16px }
+  button{ width:100%; padding:14px; margin-top:10px; font-family:inherit; font-size:15px; letter-spacing:1px;
+    background:linear-gradient(180deg,#191325,#120d1c); color:var(--ink); border:1px solid var(--edge);
+    border-radius:6px; cursor:pointer }
+  button:hover{ border-color:var(--gold) }
+  button:disabled{ opacity:.4; cursor:not-allowed }
+  button.primary{ border-color:var(--gold); color:var(--gold); font-size:17px; padding:16px }
+  button.danger:hover{ border-color:var(--bad); color:var(--bad) }
+  #progress-wrap{ display:none; margin-top:14px; height:14px; background:#000; border:1px solid var(--edge);
+    border-radius:3px; overflow:hidden }
+  #progress-fill{ height:100%; width:0%; background:linear-gradient(90deg,#5a4420,var(--gold)); transition:width .2s }
+  #status{ margin-top:10px; font-size:12px; color:var(--dim); text-align:center; min-height:16px; word-break:break-word }
+  #quota{ margin-top:14px; font-size:11px; color:#4a4060; text-align:center }
+  .steps{ margin-top:18px; font-size:12px; color:var(--dim); line-height:1.7 }
+  .steps b{ color:var(--ink) }
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>Pocket Player</h1>
+  <div class="sub">RUN A WEB GAME FULLY OFFLINE, FROM THIS DEVICE</div>
+
+  <div id="no-game" class="box">
+    <h2>No game installed</h2>
+    <p>Import a game packaged as a <b>.zip</b> (for RPG Maker MV: the contents of the game's
+    <b>www</b> folder). The files are stored in this browser, on this device only —
+    nothing is uploaded anywhere.</p>
+  </div>
+
+  <div id="has-game" class="box" style="display:none">
+    <h2>Installed game</h2>
+    <p class="gname" id="game-name">—</p>
+    <p id="game-info">—</p>
+  </div>
+
+  <button id="btn-play" class="primary">▶ &nbsp;Play</button>
+  <button id="btn-import">Import game (.zip)</button>
+  <button id="btn-delete" class="danger">Remove imported game</button>
+  <input type="file" id="file" accept=".zip,application/zip,application/x-zip-compressed" style="display:none">
+
+  <div id="progress-wrap"><div id="progress-fill"></div></div>
+  <div id="status"></div>
+  <div id="quota"></div>
+
+  <div class="steps">
+    <b>iPhone tip:</b> open this page in Safari → Share → <b>Add to Home Screen</b>.
+    Installed as an app, the imported game gets far more storage and is safe from
+    Safari's cleanup. Import once, then play offline forever. In-game saves live in
+    this browser profile — removing the app removes the saves too.
+  </div>
+</div>
+<script src="fflate.min.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
