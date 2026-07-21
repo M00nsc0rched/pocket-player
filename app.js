@@ -15,6 +15,9 @@
   };
   const GAME_CACHE = 'pp-game-v1';
   const META_KEY = 'pp-meta-v1';
+  // displayed on the page; keep in step with SHELL in sw.js — the page is served
+  // from that cache, so what you see is what is actually running
+  const PP_VERSION = 5;
 
   const $ = id => document.getElementById(id);
   const fmtMB = b => (b / 1048576).toFixed(1) + ' MB';
@@ -157,6 +160,7 @@
   window.PP = { importZip, deleteGame, play, meta, refresh, onPick };
 
   window.addEventListener('load', () => {
+    $('ver').textContent = 'Pocket Player v' + PP_VERSION;
     if ('serviceWorker' in navigator && window.isSecureContext)
       navigator.serviceWorker.register('sw.js').catch(()=>{});
     // arrived here from a game URL with nothing imported in THIS browser/app copy
