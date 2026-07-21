@@ -2,7 +2,7 @@
 // Two caches: the app shell (this tool), and the imported game's files.
 // Game requests are served entirely from the game cache — the game itself
 // never touches the network, so it runs fully offline.
-const SHELL = 'pp-shell-v2';
+const SHELL = 'pp-shell-v4';
 const GAME = 'pp-game-v1';
 const SHELL_ASSETS = [
   './',
