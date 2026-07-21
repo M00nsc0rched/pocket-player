@@ -16,10 +16,22 @@ you own.
 - The page unzips your file **in the browser** (streaming, via
   [fflate](https://github.com/101arrowz/fflate), MIT) and stores every file in
   **Cache Storage** with a proper MIME type.
-- A **service worker** answers every request under `game/…` straight from that
-  cache — including **HTTP Range** responses, which iOS Safari requires for
-  audio/video elements. The game never touches the network.
-- `Play` simply navigates to the shallowest `index.html` found in the zip.
+- A **service worker** answers every game request straight from cache —
+  including **HTTP Range** responses, which iOS Safari requires for audio/video
+  elements. The game never touches the network.
+- `Play` navigates to the shallowest `index.html` found in the zip.
+
+## A library of games (each isolated)
+
+Several games live side by side. Each import gets its **own id**, its **own
+cache** (`pp-game-<id>`) and its **own URL base** (`g/<id>/…`), so importing a
+new game never clobbers the others. Saves are isolated too: the shim namespaces
+each game's `localStorage` by its id (`pp:<id>:…`), so two RPG Maker games can't
+overwrite each other's save files.
+
+The original single-slot install (cache `pp-game-v1`, base `game/`) is preserved
+untouched — updating the tool leaves an already-installed game and its saves
+exactly as they were. Removing one game leaves the rest intact.
 
 ## Using it on an iPhone
 
@@ -30,9 +42,11 @@ you own.
    (from the player page itself, never from inside a game).
 2. Get the game's zip onto the phone (iCloud Drive / AirDrop / Files).
    For RPG Maker MV, zip the **contents of the `www` folder**.
-3. Open the **home-screen icon** → **Import game (.zip)** → pick the zip →
-   wait for the bar. (The screen is kept awake during the import.)
-4. **▶ Play.** Next time, it's two taps: open app → Play. Airplane mode welcome.
+3. Open the **home-screen icon** → **Import a game (.zip)** → pick the zip →
+   wait for the bar. (The screen is kept awake during the import.) Repeat to
+   add more games — they stack in the library, each with its own saves.
+4. Tap **▶** next to a game to play. Next time, it's two taps: open app → ▶.
+   Airplane mode welcome.
 
 If a game misbehaves, the player injects a small shim that (a) replaces the
 useless "Script error" with the real message on screen, (b) rescues failed

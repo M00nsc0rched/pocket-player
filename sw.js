@@ -1,9 +1,12 @@
 // Pocket Player service worker.
-// Two caches: the app shell (this tool), and the imported game's files.
-// Game requests are served entirely from the game cache — the game itself
-// never touches the network, so it runs fully offline.
-const SHELL = 'pp-shell-v6';
-const GAME = 'pp-game-v1';
+// Caches: the app shell (this tool) + one cache per imported game.
+//   legacy single-slot game → cache 'pp-game-v1', served under 'game/…'
+//   new library games        → cache 'pp-game-<id>', served under 'g/<id>/…'
+// Game requests are served entirely from cache — the game never touches the
+// network, so it runs fully offline. Each game keeps its own cache and its own
+// URL base, so several games coexist without clobbering each other.
+const SHELL = 'pp-shell-v7';
+const LEGACY_GAME_CACHE = 'pp-game-v1';
 const SHELL_ASSETS = [
   './',
   './index.html',
@@ -21,9 +24,11 @@ self.addEventListener('install', (e) => {
 });
 
 self.addEventListener('activate', (e) => {
+  // only sweep away stale SHELL caches — every pp-game-* cache is a user's
+  // installed game and must survive tool updates
   e.waitUntil(
     caches.keys()
-      .then(keys => Promise.all(keys.filter(k => k !== SHELL && k !== GAME).map(k => caches.delete(k))))
+      .then(keys => Promise.all(keys.filter(k => k.startsWith('pp-shell-') && k !== SHELL).map(k => caches.delete(k))))
       .then(() => self.clients.claim())
   );
 });
@@ -49,32 +54,42 @@ async function rangeResponse(res, rangeHeader) {
   });
 }
 
+async function serveGame(cacheName, request, url, scope, isIndex) {
+  const cache = await caches.open(cacheName);
+  const hit = await cache.match(url.pathname, { ignoreSearch: true });
+  if (!hit) {
+    // opening a game not imported in THIS browser/app copy → back to the player
+    if (request.mode === 'navigate') return Response.redirect(scope.pathname + '?nogame=1', 302);
+    return new Response('not in the imported game: ' + url.pathname, { status: 404 });
+  }
+  // inject the shim (readable errors, audio rescue, gamepad, save isolation)
+  if (isIndex) {
+    const text = await hit.text();
+    const tag = '<script src="' + scope.pathname + 'pp-shim.js"></' + 'script>';
+    const out = /<head[^>]*>/i.test(text) ? text.replace(/<head[^>]*>/i, m => m + tag) : tag + text;
+    return new Response(out, { headers: { 'Content-Type': 'text/html; charset=utf-8' } });
+  }
+  const range = request.headers.get('Range');
+  if (range) return rangeResponse(hit, range);
+  return hit;
+}
+
 self.addEventListener('fetch', (e) => {
   if (e.request.method !== 'GET') return;
   const url = new URL(e.request.url);
   const scope = new URL(self.registration.scope);
-  if (url.origin === scope.origin && url.pathname.startsWith(scope.pathname + 'game/')) {
-    // imported game content — cache only, never network
-    e.respondWith((async () => {
-      const cache = await caches.open(GAME);
-      const hit = await cache.match(url.pathname, { ignoreSearch: true });
-      if (!hit) {
-        // opening a game that isn't imported in THIS browser/app copy →
-        // send the person back to the player with an explanation
-        if (e.request.mode === 'navigate') return Response.redirect(scope.pathname + '?nogame=1', 302);
-        return new Response('not in the imported game: ' + url.pathname, { status: 404 });
-      }
-      // inject the shim (readable errors + audio-decode rescue) into the game's entry page
-      if (url.pathname.endsWith('/index.html')) {
-        const text = await hit.text();
-        const tag = '<script src="' + scope.pathname + 'pp-shim.js"></' + 'script>';
-        const out = /<head[^>]*>/i.test(text) ? text.replace(/<head[^>]*>/i, m => m + tag) : tag + text;
-        return new Response(out, { headers: { 'Content-Type': 'text/html; charset=utf-8' } });
-      }
-      const range = e.request.headers.get('Range');
-      if (range) return rangeResponse(hit, range);
-      return hit;
-    })());
+  if (url.origin !== scope.origin) return;
+  const rel = url.pathname.slice(scope.pathname.length);   // path under the app scope
+
+  // legacy single-slot game (the original install)
+  if (rel.startsWith('game/')) {
+    e.respondWith(serveGame(LEGACY_GAME_CACHE, e.request, url, scope, rel.endsWith('/index.html')));
+    return;
+  }
+  // library game: g/<id>/…  → its own cache pp-game-<id>
+  if (rel.startsWith('g/')) {
+    const id = rel.split('/')[1] || '';
+    e.respondWith(serveGame('pp-game-' + id, e.request, url, scope, rel.endsWith('/index.html')));
     return;
   }
   // app shell — cache-first, fill from network

@@ -26,14 +26,22 @@
   .box{ border:1px solid var(--edge); border-radius:6px; padding:14px; margin-bottom:14px; background:#0c0914 }
   .box h2{ font-size:13px; color:var(--gold); letter-spacing:1px; text-transform:uppercase; margin-bottom:6px }
   .box p{ font-size:13px; color:var(--dim); line-height:1.5 }
-  .gname{ color:var(--ink); font-size:16px }
+  .lib-title{ font-size:12px; color:var(--gold); letter-spacing:1px; text-transform:uppercase; margin:0 2px 8px }
+  .game{ display:flex; align-items:center; gap:10px; border:1px solid var(--edge); border-radius:6px;
+    padding:10px 12px; margin-bottom:10px; background:#0c0914 }
+  .ginfo{ flex:1; min-width:0 }
+  .gname{ color:var(--ink); font-size:16px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis }
+  .gmeta{ color:var(--dim); font-size:11px; margin-top:2px }
+  .game button{ width:auto; margin:0; flex:none; padding:0; border-radius:8px; }
+  .gplay{ width:52px; height:48px; font-size:20px; color:var(--gold); border-color:var(--gold)!important }
+  .gdel{ width:40px; height:48px; font-size:15px; color:var(--dim) }
+  .gdel:hover{ color:var(--bad); border-color:var(--bad)!important }
   button{ width:100%; padding:14px; margin-top:10px; font-family:inherit; font-size:15px; letter-spacing:1px;
     background:linear-gradient(180deg,#191325,#120d1c); color:var(--ink); border:1px solid var(--edge);
     border-radius:6px; cursor:pointer }
   button:hover{ border-color:var(--gold) }
   button:disabled{ opacity:.4; cursor:not-allowed }
-  button.primary{ border-color:var(--gold); color:var(--gold); font-size:17px; padding:16px }
-  button.danger:hover{ border-color:var(--bad); color:var(--bad) }
+  button.primary{ border-color:var(--gold); color:var(--gold); font-size:16px; padding:15px }
   #progress-wrap{ display:none; margin-top:14px; height:14px; background:#000; border:1px solid var(--edge);
     border-radius:3px; overflow:hidden }
   #progress-fill{ height:100%; width:0%; background:linear-gradient(90deg,#5a4420,var(--gold)); transition:width .2s }
@@ -47,24 +55,18 @@
 <body>
 <div class="card">
   <h1>Pocket Player</h1>
-  <div class="sub">RUN A WEB GAME FULLY OFFLINE, FROM THIS DEVICE</div>
+  <div class="sub">RUN WEB GAMES FULLY OFFLINE, FROM THIS DEVICE</div>
 
-  <div id="no-game" class="box">
-    <h2>No game installed</h2>
+  <div class="lib-title">Your library</div>
+  <div id="games"></div>
+  <div id="empty" class="box">
+    <h2>No games yet</h2>
     <p>Import a game packaged as a <b>.zip</b> (for RPG Maker MV: the contents of the game's
-    <b>www</b> folder). The files are stored in this browser, on this device only —
-    nothing is uploaded anywhere.</p>
+    <b>www</b> folder). Files are stored in this browser, on this device only — nothing is
+    uploaded anywhere. You can keep several games side by side; each has its own saves.</p>
   </div>
 
-  <div id="has-game" class="box" style="display:none">
-    <h2>Installed game</h2>
-    <p class="gname" id="game-name">—</p>
-    <p id="game-info">—</p>
-  </div>
-
-  <button id="btn-play" class="primary">▶ &nbsp;Play</button>
-  <button id="btn-import">Import game (.zip)</button>
-  <button id="btn-delete" class="danger">Remove imported game</button>
+  <button id="btn-import" class="primary">＋ &nbsp;Import a game (.zip)</button>
   <input type="file" id="file" accept=".zip,application/zip,application/x-zip-compressed" style="display:none">
 
   <div id="progress-wrap"><div id="progress-fill"></div></div>
@@ -74,14 +76,12 @@
 
   <div class="steps">
     <b>iPhone — the order matters:</b><br>
-    1. From THIS page: Share → <b>Add to Home Screen</b>. (Do it from this page,
-    not from inside a game.)<br>
+    1. From THIS page: Share → <b>Add to Home Screen</b> (from the player page, not from inside a game).<br>
     2. Open the new <b>home-screen icon</b> — and do the import <b>there</b>.<br>
-    3. ▶ Play.<br><br>
-    Safari and the installed app have <b>separate storage</b> on iOS — a game
-    imported in Safari is invisible to the app, and vice versa. The installed app
-    also gets a far larger quota and is safe from Safari's cleanup. In-game saves
-    live inside the app — removing the app removes the saves too.
+    3. Tap ▶ next to a game to play.<br><br>
+    Safari and the installed app have <b>separate storage</b> on iOS — a game imported in Safari
+    is invisible to the app, and vice versa. Each game keeps its own saves; removing the app
+    removes every game and its saves.
   </div>
 </div>
 <script src="fflate.min.js"></script>

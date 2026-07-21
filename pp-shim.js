@@ -11,8 +11,26 @@
 //     codec) — hand back silence instead.
 //  5. Add an on-screen gamepad (D-pad + A/B/X) that drives RPG Maker's Input
 //     directly, so the game is playable even when touch-to-move misfires.
+//  6. Namespace each library game's localStorage by its id, so games sharing
+//     this origin can't overwrite each other's saves.
 (function(){
   'use strict';
+
+  // ---- 0. Per-game save isolation ----
+  // Several games share one origin, so their localStorage saves would collide.
+  // A library game runs under g/<id>/ — namespace its localStorage keys by that
+  // id. The legacy single-slot game (under game/) stays UNPREFIXED so its
+  // existing saves keep working untouched.
+  try {
+    var gm = location.pathname.match(/\/g\/([^\/]+)\//);
+    if (gm && window.localStorage && window.Storage){
+      var pfx = 'pp:' + gm[1] + ':';
+      var SP = Storage.prototype, _g = SP.getItem, _s = SP.setItem, _r = SP.removeItem;
+      SP.getItem    = function(k){ return _g.call(this, this === localStorage ? pfx + k : k); };
+      SP.setItem    = function(k, v){ return _s.call(this, this === localStorage ? pfx + k : k, v); };
+      SP.removeItem = function(k){ return _r.call(this, this === localStorage ? pfx + k : k); };
+    }
+  } catch(e){}
 
   // ---- 1. NW.js black hole ----
   // `process` stays undefined, so Utils.isNwjs() is still false and the engine
