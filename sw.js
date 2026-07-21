@@ -2,12 +2,13 @@
 // Two caches: the app shell (this tool), and the imported game's files.
 // Game requests are served entirely from the game cache — the game itself
 // never touches the network, so it runs fully offline.
-const SHELL = 'pp-shell-v1';
+const SHELL = 'pp-shell-v2';
 const GAME = 'pp-game-v1';
 const SHELL_ASSETS = [
   './',
   './index.html',
   './app.js',
+  './pp-shim.js',
   './fflate.min.js',
   './manifest.json',
   './icon-180.png',
@@ -57,7 +58,19 @@ self.addEventListener('fetch', (e) => {
     e.respondWith((async () => {
       const cache = await caches.open(GAME);
       const hit = await cache.match(url.pathname, { ignoreSearch: true });
-      if (!hit) return new Response('not in the imported game: ' + url.pathname, { status: 404 });
+      if (!hit) {
+        // opening a game that isn't imported in THIS browser/app copy →
+        // send the person back to the player with an explanation
+        if (e.request.mode === 'navigate') return Response.redirect(scope.pathname + '?nogame=1', 302);
+        return new Response('not in the imported game: ' + url.pathname, { status: 404 });
+      }
+      // inject the shim (readable errors + audio-decode rescue) into the game's entry page
+      if (url.pathname.endsWith('/index.html')) {
+        const text = await hit.text();
+        const tag = '<script src="' + scope.pathname + 'pp-shim.js"></' + 'script>';
+        const out = /<head[^>]*>/i.test(text) ? text.replace(/<head[^>]*>/i, m => m + tag) : tag + text;
+        return new Response(out, { headers: { 'Content-Type': 'text/html; charset=utf-8' } });
+      }
       const range = e.request.headers.get('Range');
       if (range) return rangeResponse(hit, range);
       return hit;

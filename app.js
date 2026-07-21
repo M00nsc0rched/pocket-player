@@ -40,6 +40,14 @@
     if (!('serviceWorker' in navigator)) throw new Error('Service workers are unavailable in this browser.');
     await navigator.serviceWorker.ready;
     if (navigator.storage && navigator.storage.persist) navigator.storage.persist().catch(()=>{});
+    // keep the screen awake through a long import (best effort)
+    let wake = null;
+    try { if (navigator.wakeLock) wake = await navigator.wakeLock.request('screen'); } catch(e){}
+    try { return await doImport(file, onProgress); }
+    finally { try { if (wake) wake.release(); } catch(e){} }
+  }
+
+  async function doImport(file, onProgress){
 
     await caches.delete(GAME_CACHE);
     const cache = await caches.open(GAME_CACHE);
@@ -151,6 +159,14 @@
   window.addEventListener('load', () => {
     if ('serviceWorker' in navigator && window.isSecureContext)
       navigator.serviceWorker.register('sw.js').catch(()=>{});
+    // arrived here from a game URL with nothing imported in THIS browser/app copy
+    if (new URLSearchParams(location.search).has('nogame')){
+      $('status').textContent = 'No game is imported in THIS copy of the player. ' +
+        'Safari and the Home Screen app have separate storage — import the zip here, inside this app.';
+    } else if (navigator.standalone === true && !meta()){
+      $('status').textContent = 'Installed as an app. Note: the app has its own storage — ' +
+        'import the zip HERE (a Safari import does not carry over).';
+    }
     $('file').addEventListener('change', e => onPick(e.target.files[0]));
     $('btn-import').addEventListener('click', () => $('file').click());
     $('btn-play').addEventListener('click', play);

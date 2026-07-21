@@ -23,13 +23,20 @@ you own.
 
 ## Using it on an iPhone
 
-1. Open the player page in Safari → Share → **Add to Home Screen**.
-   (Installed web apps get a much larger storage quota and are exempt from
-   Safari's periodic data eviction — for a multi-hundred-MB game, install first.)
+**The order matters** — on iOS, Safari and an installed home-screen app have
+**separate storage**: a game imported in Safari is invisible to the app.
+
+1. Open the player page in Safari → Share → **Add to Home Screen**
+   (from the player page itself, never from inside a game).
 2. Get the game's zip onto the phone (iCloud Drive / AirDrop / Files).
    For RPG Maker MV, zip the **contents of the `www` folder**.
-3. Open the app → **Import game (.zip)** → pick the zip → wait for the bar.
+3. Open the **home-screen icon** → **Import game (.zip)** → pick the zip →
+   wait for the bar. (The screen is kept awake during the import.)
 4. **▶ Play.** Next time, it's two taps: open app → Play. Airplane mode welcome.
+
+If a game misbehaves, the player injects a small shim that (a) replaces the
+useless "Script error" with the real message on screen, and (b) rescues failed
+audio decodes with silence so a missing codec can't crash the game.
 
 Notes:
 - One game slot. Importing another zip replaces the previous game
