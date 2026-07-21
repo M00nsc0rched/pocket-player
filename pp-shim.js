@@ -9,6 +9,8 @@
 //     stays reachable) instead of a frozen screen.
 //  4. Never let a failed audio decode kill the game (iOS may lack the OGG
 //     codec) — hand back silence instead.
+//  5. Add an on-screen gamepad (D-pad + A/B/X) that drives RPG Maker's Input
+//     directly, so the game is playable even when touch-to-move misfires.
 (function(){
   'use strict';
 
@@ -50,12 +52,16 @@
       setTimeout(function(){ if (d.parentNode) d.remove(); }, 12000);
     } catch(e){}
   }
+  // buggy MV plugins do eval(String(pluginParamsObject)) → eval("[object Object]"),
+  // a SyntaxError that aborts only that one plugin (a cosmetic loss) while the
+  // game boots on. Safari blames the plugin file, other engines blame index.html —
+  // mute the signature wherever it lands. Real game syntax errors never say this.
+  function benign(msg){
+    return /Unexpected identifier ['"]?Object/.test(msg) || /\[object Object\]/.test(msg);
+  }
   window.addEventListener('error', function(e){
     var msg = e.message || '', file = e.filename || '';
-    // known-benign: buggy plugins eval(String(paramsObject)) → "[object Object]";
-    // eval errors get attributed to the page itself, so only those are muted —
-    // a real syntax error in a game script still shows with its own filename
-    if (/Unexpected identifier/.test(msg) && /index\.html/.test(file)) return;
+    if (benign(msg)) return;
     overlay((msg || 'unknown error') + '\n' + (file || '?') + ':' + (e.lineno || '?'));
   });
   window.addEventListener('unhandledrejection', function(e){
@@ -113,7 +119,104 @@
   // stop iOS rubber-band scrolling from stealing touches (the overlay may still scroll)
   document.addEventListener('touchmove', function(e){
     var t = e.target;
-    while (t && t !== document.body){ if (t.id === 'pp-err') return; t = t.parentNode; }
+    while (t && t !== document.body){ if (t.id === 'pp-err' || t.id === 'pp-pad') return; t = t.parentNode; }
     e.preventDefault();
   }, { passive: false });
+
+  // ---- 5. On-screen gamepad for RPG Maker MV/MZ ----
+  // Touch-to-move misfires in an iOS standalone webapp; these buttons drive the
+  // engine's Input state directly, sidestepping touch coordinates entirely.
+  //   D-pad → up/down/left/right   A → ok (confirm)   B → escape (cancel)
+  //   X → escape (opens the menu on the map, where cancel == menu in MV)
+  function inputState(){ return (window.Input && window.Input._currentState) || null; }
+  function setKey(name, on){ var s = inputState(); if (s) s[name] = on; }
+
+  // wire a button for touch + mouse; onDown/onUp fire once per press, and the
+  // touch handler swallows the event so the game's canvas doesn't also see it
+  function wire(el, onDown, onUp){
+    var down = function(e){ if (e){ e.preventDefault(); e.stopPropagation(); } el.classList.add('on'); onDown(); };
+    var up   = function(e){ if (e){ e.preventDefault(); e.stopPropagation(); } el.classList.remove('on'); onUp(); };
+    el.addEventListener('touchstart', down, { passive:false });
+    el.addEventListener('touchend', up);
+    el.addEventListener('touchcancel', up);
+    el.addEventListener('mousedown', down);
+    el.addEventListener('mouseup', up);
+    el.addEventListener('mouseleave', function(e){ if (el.classList.contains('on')) up(e); });
+  }
+  // directions are held down while pressed
+  function wireHold(el, name){ wire(el, function(){ setKey(name, true); }, function(){ setKey(name, false); }); }
+  // actions are momentary, but held true for a minimum so a fast tap still registers a frame
+  function wirePress(el, name){
+    var downAt = 0, t = null;
+    wire(el,
+      function(){ downAt = Date.now(); if (t){ clearTimeout(t); t = null; } setKey(name, true); },
+      function(){ var wait = Math.max(0, 80 - (Date.now() - downAt)); t = setTimeout(function(){ setKey(name, false); }, wait); });
+  }
+
+  function buildPad(){
+    if (document.getElementById('pp-pad')) return;
+    if (!inputState()) return;
+
+    var css = document.createElement('style');
+    css.textContent =
+      '#pp-pad{position:fixed;inset:0;z-index:2147483000;pointer-events:none;' +
+        '-webkit-user-select:none;user-select:none;-webkit-touch-callout:none;' +
+        'font-family:-apple-system,Segoe UI,sans-serif;}' +
+      '#pp-pad .b{position:absolute;pointer-events:auto;touch-action:none;display:flex;' +
+        'align-items:center;justify-content:center;font-weight:bold;text-shadow:0 1px 2px #000;' +
+        'background:rgba(24,20,36,.32);border:2px solid rgba(255,255,255,.28);border-radius:50%;' +
+        'transition:background .05s,transform .05s;}' +
+      '#pp-pad .b.on{background:rgba(208,168,78,.7);transform:scale(.9);}' +
+      '#pp-pad .d{width:56px;height:56px;font-size:22px;color:#fff;}' +
+      '#pp-pad .a{width:64px;height:64px;font-size:24px;}';
+    document.head.appendChild(css);
+
+    var pad = document.createElement('div');
+    pad.id = 'pp-pad';
+    var SB = 'env(safe-area-inset-bottom)', SL = 'env(safe-area-inset-left)', SR = 'env(safe-area-inset-right)';
+
+    // D-pad, bottom-left
+    var dirs = [
+      ['up','▲',62,124], ['left','◀',2,62], ['right','▶',122,62], ['down','▼',62,2],
+    ];
+    dirs.forEach(function(d){
+      var b = document.createElement('div');
+      b.className = 'b d'; b.textContent = d[1];
+      b.style.left = 'calc(18px + ' + SL + ' + ' + d[2] + 'px)';
+      b.style.bottom = 'calc(22px + ' + SB + ' + ' + d[3] + 'px)';
+      wireHold(b, d[0]); pad.appendChild(b);
+    });
+
+    // A / B / X cluster, bottom-right (X top · A middle · B bottom, per the sketch)
+    var acts = [
+      ['X','escape','#7fb0d0',30,150],
+      ['A','ok',    '#6fbf6a',66,80],
+      ['B','escape','#c05070',30,10],
+    ];
+    acts.forEach(function(a){
+      var b = document.createElement('div');
+      b.className = 'b a'; b.textContent = a[0]; b.style.color = a[2];
+      b.style.right = 'calc(20px + ' + SR + ' + ' + a[3] + 'px)';
+      b.style.bottom = 'calc(24px + ' + SB + ' + ' + a[4] + 'px)';
+      wirePress(b, a[1]); pad.appendChild(b);
+    });
+
+    (document.body || document.documentElement).appendChild(pad);
+  }
+  window.__ppBuildPad = buildPad;   // exposed for forcing/testing
+
+  // show only where it helps: a touch/coarse pointer, an installed app, or ?pad
+  function padWanted(){
+    try {
+      return (window.matchMedia && matchMedia('(pointer: coarse)').matches) ||
+        navigator.maxTouchPoints > 0 || 'ontouchstart' in window ||
+        window.navigator.standalone === true || location.search.indexOf('pad') >= 0;
+    } catch(e){ return false; }
+  }
+  var padPoll = setInterval(function(){
+    if (!inputState()) return;              // wait for the engine's Input to exist
+    clearInterval(padPoll);
+    if (padWanted()) buildPad();
+  }, 400);
+  setTimeout(function(){ clearInterval(padPoll); }, 40000);
 })();

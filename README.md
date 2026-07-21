@@ -35,8 +35,26 @@ you own.
 4. **▶ Play.** Next time, it's two taps: open app → Play. Airplane mode welcome.
 
 If a game misbehaves, the player injects a small shim that (a) replaces the
-useless "Script error" with the real message on screen, and (b) rescues failed
-audio decodes with silence so a missing codec can't crash the game.
+useless "Script error" with the real message on screen, (b) rescues failed
+audio decodes with silence so a missing codec can't crash the game, (c) fixes
+the mobile viewport, and (d) neutralises desktop-only `require()`/Steam plugin
+calls.
+
+## On-screen gamepad (RPG Maker MV/MZ)
+
+Touch-to-move often misfires inside an iOS standalone web app, so for RPG Maker
+games the shim adds an **on-screen gamepad** that drives the engine's `Input`
+state directly (bypassing touch coordinates entirely):
+
+- **D-pad** (bottom-left) — move / navigate menus.
+- **A** — OK / confirm / advance dialogue (`ok`).
+- **B** — back / cancel (`escape`).
+- **X** — menu (`escape`; on the map, cancel opens the menu in MV).
+
+It appears automatically on touch devices, installed apps, and coarse-pointer
+screens (or force it with `?pad` on the game URL). Buttons are held for
+directions and momentary for actions, with a minimum hold so fast taps still
+register a frame. The engine's own keyboard input keeps working alongside.
 
 Notes:
 - One game slot. Importing another zip replaces the previous game
