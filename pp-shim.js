@@ -104,9 +104,14 @@
   // behaviour — so a genuinely broken file still never crashes the game.
 
   // Lazily load the decoder bundle (added to the app shell) and spin up ONE
-  // shared worker decoder. decodeFile() resets itself after each call and the
-  // worker runs calls one-at-a-time in order, so a single instance is safe for
-  // every game sound. Nothing loads until the first OGG actually needs us.
+  // shared MAIN-THREAD decoder. We deliberately do NOT use the bundle's web
+  // worker: inside an iOS standalone PWA a blob-URL worker is unreliable — it
+  // can abort mid-decode and the library then emits an uncatchable
+  // "operation was aborted" promise rejection (and no sound). The main-thread
+  // decoder is synchronous (it blocks briefly per sound) but rock-solid.
+  // decodeFile() resets itself after each call, so one instance handles every
+  // sound; calls are serialised through _decChain below to avoid reentrancy.
+  // Nothing loads until the first OGG actually needs us.
   var _vorbis = null;
   function loadScript(src){
     return new Promise(function(res, rej){
@@ -121,20 +126,21 @@
     if (_vorbis) return _vorbis;
     _vorbis = loadScript(ROOT + 'ogg-vorbis-decoder.min.js').then(function(){
       var ns = window['ogg-vorbis-decoder'];
-      if (!ns) throw new Error('ogg-vorbis-decoder not available');
-      function make(Cls){ var d = new Cls(); return Promise.resolve(d.ready).then(function(){ return d; }); }
-      // Prefer the worker (non-blocking); fall back to the main-thread decoder
-      // if a worker can't be spun up (some locked-down iOS webview cases).
-      if (ns.OggVorbisDecoderWebWorker){
-        return make(ns.OggVorbisDecoderWebWorker).catch(function(){
-          if (ns.OggVorbisDecoder) return make(ns.OggVorbisDecoder);
-          throw new Error('no usable OGG decoder');
-        });
-      }
-      if (ns.OggVorbisDecoder) return make(ns.OggVorbisDecoder);
-      throw new Error('no usable OGG decoder');
+      if (!ns || !ns.OggVorbisDecoder) throw new Error('OGG decoder unavailable');
+      var d = new ns.OggVorbisDecoder();
+      return Promise.resolve(d.ready).then(function(){ return d; });
     });
     return _vorbis;
+  }
+  // Serialise decode calls: the shared main-thread decoder has one WASM heap, so
+  // overlapping decodeFile() calls (several sounds loading at once) must queue.
+  var _decChain = Promise.resolve();
+  function decodeOgg(bytes){
+    var run = _decChain.then(function(){
+      return vorbisDecoder().then(function(dec){ return dec.decodeFile(bytes); });
+    });
+    _decChain = run.then(function(){}, function(){});   // keep the chain alive past failures
+    return run;
   }
 
   var AC = window.AudioContext || window.webkitAudioContext;
@@ -180,8 +186,7 @@
           // WebKit builds decodeAudioData never calls back at all for it (no
           // success, no error) — so waiting for it to "fail" would hang the sound
           // forever. Desktop gives up native speed but stays correct.
-          vorbisDecoder()
-            .then(function(dec){ return dec.decodeFile(bytes); })
+          decodeOgg(bytes)
             .then(function(res){ ok(toAudioBuffer(ctx, res)); })
             .catch(function(e){ overlay('OGG audio could not be decoded:\n' + (e && (e.message || e))); silence(); });
           return;

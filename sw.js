@@ -5,7 +5,7 @@
 // Game requests are served entirely from cache — the game never touches the
 // network, so it runs fully offline. Each game keeps its own cache and its own
 // URL base, so several games coexist without clobbering each other.
-const SHELL = 'pp-shell-v9';
+const SHELL = 'pp-shell-v10';
 const LEGACY_GAME_CACHE = 'pp-game-v1';
 const SHELL_ASSETS = [
   './',
