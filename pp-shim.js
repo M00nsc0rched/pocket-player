@@ -159,8 +159,8 @@
 
     AC.prototype.decodeAudioData = function(buf, onOk, onErr){
       var ctx = this;
-      // Peek at the 'OggS' magic without copying; keep a byte copy ONLY for OGG,
-      // because the native call below may detach `buf` and the fallback needs it.
+      // Peek at the 'OggS' magic without copying; keep a byte copy for OGG since
+      // we hand it to the worker decoder (and a native attempt could detach it).
       var ogg = false, bytes = null;
       try {
         var head = new Uint8Array(buf, 0, Math.min(4, buf.byteLength || 0));
@@ -173,19 +173,26 @@
         function ok(b){ if (done) return; done = true; if (onOk){ try { onOk(b); } catch(e){} } resolve(b); }
         function fail(err){ if (done) return; done = true; if (onErr){ try { onErr(err); } catch(e){} } reject(err); }
         function silence(){ var s = silenceBuffer(ctx); if (s) ok(s); else fail(new Error('decode failed')); }
-        function fallback(){
-          if (!ogg || !bytes){ silence(); return; }
+
+        if (ogg && bytes){
+          // Decode OGG Vorbis ourselves, UNCONDITIONALLY. We can't lean on the
+          // native decoder here: iOS Safari not only can't decode OGG, in some
+          // WebKit builds decodeAudioData never calls back at all for it (no
+          // success, no error) — so waiting for it to "fail" would hang the sound
+          // forever. Desktop gives up native speed but stays correct.
           vorbisDecoder()
             .then(function(dec){ return dec.decodeFile(bytes); })
             .then(function(res){ ok(toAudioBuffer(ctx, res)); })
-            .catch(function(){ silence(); });
+            .catch(function(e){ overlay('OGG audio could not be decoded:\n' + (e && (e.message || e))); silence(); });
+          return;
         }
-
+        // non-OGG (m4a / wav / mp3): the platform decodes these fine; on failure
+        // fall back to silence so the game never crashes.
         var p;
         try {
-          p = orig.call(ctx, buf, function(b){ ok(b); }, function(){ fallback(); });
-        } catch(e){ fallback(); return; }
-        if (p && p.then) p.then(function(b){ ok(b); }, function(){ fallback(); });
+          p = orig.call(ctx, buf, function(b){ ok(b); }, function(){ silence(); });
+        } catch(e){ silence(); return; }
+        if (p && p.then) p.then(function(b){ ok(b); }, function(){ silence(); });
       });
     };
   }
