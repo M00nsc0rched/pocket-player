@@ -16,6 +16,13 @@
 (function(){
   'use strict';
 
+  // The app-shell root (…/pocket-player/): this shim is loaded from there as
+  // <script src="{root}pp-shim.js">, so its own URL's directory IS the root.
+  // We load the OGG decoder bundle from the same place (the service worker
+  // serves it from the app-shell cache, so it works offline).
+  var ROOT = '';
+  try { ROOT = ((document.currentScript && document.currentScript.src) || '').replace(/[^\/]*$/, ''); } catch(e){}
+
   // ---- 0. Per-game save isolation ----
   // Several games share one origin, so their localStorage saves would collide.
   // A library game runs under g/<id>/ — namespace its localStorage keys by that
@@ -87,25 +94,99 @@
     overlay('Unhandled rejection: ' + (r && (r.message || r.stack || r) || 'unknown'));
   });
 
-  // ---- 4. audio decode rescue ----
+  // ---- 4. audio decode rescue + OGG Vorbis fallback ----
+  // iOS Safari can't natively decode OGG Vorbis (RPG Maker MV's default audio
+  // format), so BGM/BGS/ME/SE would all come back silent. We wrap decodeAudioData:
+  // try the native decoder first (desktop Chrome, and iOS m4a/wav, go straight
+  // through); if it fails on an 'OggS' stream, decode it ourselves with a WASM
+  // Vorbis decoder (a web worker, off the main thread) and hand back a real
+  // AudioBuffer. Only if THAT also fails do we return silence — the original
+  // behaviour — so a genuinely broken file still never crashes the game.
+
+  // Lazily load the decoder bundle (added to the app shell) and spin up ONE
+  // shared worker decoder. decodeFile() resets itself after each call and the
+  // worker runs calls one-at-a-time in order, so a single instance is safe for
+  // every game sound. Nothing loads until the first OGG actually needs us.
+  var _vorbis = null;
+  function loadScript(src){
+    return new Promise(function(res, rej){
+      var s = document.createElement('script');
+      s.src = src; s.charset = 'UTF-8'; s.async = true;
+      s.onload = function(){ res(); };
+      s.onerror = function(){ rej(new Error('failed to load ' + src)); };
+      (document.head || document.documentElement).appendChild(s);
+    });
+  }
+  function vorbisDecoder(){
+    if (_vorbis) return _vorbis;
+    _vorbis = loadScript(ROOT + 'ogg-vorbis-decoder.min.js').then(function(){
+      var ns = window['ogg-vorbis-decoder'];
+      if (!ns) throw new Error('ogg-vorbis-decoder not available');
+      function make(Cls){ var d = new Cls(); return Promise.resolve(d.ready).then(function(){ return d; }); }
+      // Prefer the worker (non-blocking); fall back to the main-thread decoder
+      // if a worker can't be spun up (some locked-down iOS webview cases).
+      if (ns.OggVorbisDecoderWebWorker){
+        return make(ns.OggVorbisDecoderWebWorker).catch(function(){
+          if (ns.OggVorbisDecoder) return make(ns.OggVorbisDecoder);
+          throw new Error('no usable OGG decoder');
+        });
+      }
+      if (ns.OggVorbisDecoder) return make(ns.OggVorbisDecoder);
+      throw new Error('no usable OGG decoder');
+    });
+    return _vorbis;
+  }
+
   var AC = window.AudioContext || window.webkitAudioContext;
   if (AC && AC.prototype && AC.prototype.decodeAudioData){
     var orig = AC.prototype.decodeAudioData;
+
+    function silenceBuffer(ctx){
+      try { return ctx.createBuffer(1, Math.max(1, Math.round(ctx.sampleRate * 0.05)), ctx.sampleRate); }
+      catch(e){ return null; }
+    }
+    function isOgg(u8){ return u8.length >= 4 && u8[0] === 0x4F && u8[1] === 0x67 && u8[2] === 0x67 && u8[3] === 0x53; }
+    function toAudioBuffer(ctx, res){
+      var ch = res && res.channelData, n = res && res.samplesDecoded, sr = (res && res.sampleRate) || ctx.sampleRate;
+      if (!n || !ch || !ch.length) throw new Error('empty decode');
+      var ab = ctx.createBuffer(ch.length, n, sr);
+      for (var i = 0; i < ch.length; i++){
+        if (ab.copyToChannel) ab.copyToChannel(ch[i], i);
+        else ab.getChannelData(i).set(ch[i]);
+      }
+      return ab;
+    }
+
     AC.prototype.decodeAudioData = function(buf, onOk, onErr){
       var ctx = this;
-      function silence(){
-        try { return ctx.createBuffer(1, Math.max(1, Math.round(ctx.sampleRate * 0.05)), ctx.sampleRate); }
-        catch(e){ return null; }
-      }
-      function rescue(){ var s = silence(); if (s && onOk) onOk(s); return s; }
+      // Peek at the 'OggS' magic without copying; keep a byte copy ONLY for OGG,
+      // because the native call below may detach `buf` and the fallback needs it.
+      var ogg = false, bytes = null;
       try {
-        var p = orig.call(ctx, buf, onOk ? function(d){ onOk(d); } : undefined, function(){ rescue(); });
-        if (p && p.catch) return p.catch(function(){ return rescue() || Promise.reject(new Error('decode failed')); });
-        return p;
-      } catch(ex){
-        var s = rescue();
-        return s ? Promise.resolve(s) : Promise.reject(ex);
-      }
+        var head = new Uint8Array(buf, 0, Math.min(4, buf.byteLength || 0));
+        ogg = isOgg(head);
+        if (ogg) bytes = new Uint8Array(buf.slice(0));
+      } catch(e){}
+
+      return new Promise(function(resolve, reject){
+        var done = false;
+        function ok(b){ if (done) return; done = true; if (onOk){ try { onOk(b); } catch(e){} } resolve(b); }
+        function fail(err){ if (done) return; done = true; if (onErr){ try { onErr(err); } catch(e){} } reject(err); }
+        function silence(){ var s = silenceBuffer(ctx); if (s) ok(s); else fail(new Error('decode failed')); }
+        function fallback(){
+          if (!ogg || !bytes){ silence(); return; }
+          vorbisDecoder()
+            .then(function(dec){ return dec.decodeFile(bytes); })
+            .then(function(res){ ok(toAudioBuffer(ctx, res)); })
+            .catch(function(){ silence(); });
+        }
+
+        var p;
+        try {
+          p = orig.call(ctx, buf, function(b){ ok(b); }, function(){ fallback(); });
+        } catch(e){ fallback(); return; }
+        if (p && p.then) p.then(function(b){ ok(b); }, function(){ fallback(); });
+      });
     };
   }
 
@@ -144,8 +225,8 @@
   // ---- 5. On-screen gamepad for RPG Maker MV/MZ ----
   // Touch-to-move misfires in an iOS standalone webapp; these buttons drive the
   // engine's Input state directly, sidestepping touch coordinates entirely.
-  //   D-pad → up/down/left/right   A → ok (confirm)   B → escape (cancel)
-  //   X → escape (opens the menu on the map, where cancel == menu in MV)
+  //   D-pad → up/down/left/right   A → ok (confirm)   B → escape (cancel/menu)
+  //   X → shift (dash/run — held down while pressed, like the keyboard Shift)
   function inputState(){ return (window.Input && window.Input._currentState) || null; }
   function setKey(name, on){ var s = inputState(); if (s) s[name] = on; }
 
@@ -205,18 +286,20 @@
       wireHold(b, d[0]); pad.appendChild(b);
     });
 
-    // A / B / X cluster, bottom-right (X top · A middle · B bottom, per the sketch)
+    // A / B / X cluster, bottom-right (X top · A middle · B bottom, per the sketch).
+    // The 5th field picks the binding: 'hold' keeps the key down while pressed
+    // (X = shift/dash needs this), 'press' is a momentary tap (A/B).
     var acts = [
-      ['X','escape','#7fb0d0',30,150],
-      ['A','ok',    '#6fbf6a',66,80],
-      ['B','escape','#c05070',30,10],
+      ['X','shift', '#7fb0d0',30,150,'hold'],
+      ['A','ok',    '#6fbf6a',66,80, 'press'],
+      ['B','escape','#c05070',30,10, 'press'],
     ];
     acts.forEach(function(a){
       var b = document.createElement('div');
       b.className = 'b a'; b.textContent = a[0]; b.style.color = a[2];
       b.style.right = 'calc(20px + ' + SR + ' + ' + a[3] + 'px)';
       b.style.bottom = 'calc(24px + ' + SB + ' + ' + a[4] + 'px)';
-      wirePress(b, a[1]); pad.appendChild(b);
+      (a[5] === 'hold' ? wireHold : wirePress)(b, a[1]); pad.appendChild(b);
     });
 
     (document.body || document.documentElement).appendChild(pad);
