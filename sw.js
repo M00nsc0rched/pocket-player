@@ -5,7 +5,7 @@
 // Game requests are served entirely from cache — the game never touches the
 // network, so it runs fully offline. Each game keeps its own cache and its own
 // URL base, so several games coexist without clobbering each other.
-const SHELL = 'pp-shell-v10';
+const SHELL = 'pp-shell-v11';
 const LEGACY_GAME_CACHE = 'pp-game-v1';
 const SHELL_ASSETS = [
   './',
@@ -57,7 +57,17 @@ async function rangeResponse(res, rangeHeader) {
 
 async function serveGame(cacheName, request, url, scope, isIndex) {
   const cache = await caches.open(cacheName);
-  const hit = await cache.match(url.pathname, { ignoreSearch: true });
+  let hit = await cache.match(url.pathname, { ignoreSearch: true });
+  if (!hit) {
+    // RPG Maker MV on iOS ALWAYS asks for .m4a audio (Utils.isMobileDevice()
+    // forces audioFileExt() to '.m4a'), but most games ship only .ogg — so the
+    // .m4a 404s and every sound is silent. Serve the OGG twin when the M4A is
+    // missing (same for encrypted .rpgmvm → .rpgmvo). Safe because the audio is
+    // decoded by content: the WebAudio path hits our decodeAudioData shim, which
+    // recognises the 'OggS' bytes regardless of the extension in the URL.
+    const alt = url.pathname.replace(/\.m4a$/i, '.ogg').replace(/\.rpgmvm$/i, '.rpgmvo');
+    if (alt !== url.pathname) hit = await cache.match(alt, { ignoreSearch: true });
+  }
   if (!hit) {
     // opening a game not imported in THIS browser/app copy → back to the player
     if (request.mode === 'navigate') return Response.redirect(scope.pathname + '?nogame=1', 302);
