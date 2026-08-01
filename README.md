@@ -51,8 +51,10 @@ exactly as they were. Removing one game leaves the rest intact.
 If a game misbehaves, the player injects a small shim that (a) replaces the
 useless "Script error" with the real message on screen, (b) rescues failed
 audio decodes with silence so a missing codec can't crash the game, (c) fixes
-the mobile viewport, and (d) neutralises desktop-only `require()`/Steam plugin
-calls.
+the mobile viewport **for pages that need it** (RPG Maker's stock page lacks
+`width=device-width`) while leaving games that already handle mobile — e.g.
+SDL/Emscripten ports with their own on-screen joystick — completely untouched,
+and (d) neutralises desktop-only `require()`/Steam plugin calls.
 
 ## On-screen gamepad (RPG Maker MV/MZ)
 

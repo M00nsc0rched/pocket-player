@@ -2,9 +2,12 @@
 // service worker. Jobs:
 //  1. Provide a harmless `require` so desktop-only (NW.js/Steam) plugin code
 //     dissolves into no-ops instead of crashing the game in a browser.
-//  2. Fix the mobile viewport: RPG Maker's stock page lacks width=device-width,
-//     so iOS renders it at desktop width — the game overflows the screen and
-//     touch coordinates land in the wrong place.
+//  2. Fix the mobile viewport for pages that DON'T manage their own — RPG Maker's
+//     stock page lacks width=device-width, so iOS renders it at desktop width and
+//     touch coordinates land wrong. Games that ship their own mobile viewport or
+//     render into a <canvas> (e.g. SDL/Emscripten ports like DevilutionX with
+//     their own on-screen joystick) are left untouched, so we never lag or
+//     mis-place their controls.
 //  3. Show real, readable error messages (deduped, top-anchored so the game
 //     stays reachable) instead of a frozen screen.
 //  4. Never let a failed audio decode kill the game (iOS may lack the OGG
@@ -202,7 +205,26 @@
     };
   }
 
-  // ---- 2. mobile viewport & touch fit ----
+  // ---- 2. mobile viewport & touch fit (only for pages that don't self-manage) ----
+  // A game that already declares a proper mobile viewport, or renders into a
+  // <canvas> that's already in the page (SDL/Emscripten ports such as DevilutionX),
+  // drives its own layout, touch input and on-screen controls. Rewriting the
+  // viewport there does harm, not good: forcing viewport-fit=cover shoves the
+  // game's own joystick under the screen's clipped edge (wrong position), the
+  // synthetic resize events make it jump after load, and a non-passive document
+  // touchmove listener adds latency to every finger move (laggy joystick). So we
+  // step in ONLY for a page that manages neither — i.e. RPG Maker's stock page,
+  // whose viewport lacks width=device-width and whose canvas is created later, at
+  // runtime, so there is none at DOM-ready.
+  function selfManagesLayout(){
+    try {
+      var metas = document.querySelectorAll('meta[name="viewport"]');
+      for (var i = 0; i < metas.length; i++)
+        if (/width\s*=\s*device-width/i.test(metas[i].getAttribute('content') || '')) return true;
+      if (document.querySelector('canvas')) return true;
+    } catch(e){}
+    return false;
+  }
   function fixViewport(){
     try {
       var metas = document.querySelectorAll('meta[name="viewport"]');
@@ -223,16 +245,23 @@
       setTimeout(function(){ window.dispatchEvent(new Event('resize')); }, 400);
     } catch(e){}
   }
-  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', fixViewport);
-  else fixViewport();
-  window.addEventListener('orientationchange', function(){ setTimeout(fixViewport, 300); });
-
-  // stop iOS rubber-band scrolling from stealing touches (the overlay may still scroll)
-  document.addEventListener('touchmove', function(e){
-    var t = e.target;
-    while (t && t !== document.body){ if (t.id === 'pp-err' || t.id === 'pp-pad') return; t = t.parentNode; }
-    e.preventDefault();
-  }, { passive: false });
+  var _ownViewport = false;   // did WE take over the viewport (RPG Maker stock page)?
+  function setupViewport(){
+    if (selfManagesLayout()) return;   // game handles mobile itself — don't fight it
+    _ownViewport = true;
+    fixViewport();
+    // stop iOS rubber-band scrolling from stealing touches (the overlay may still
+    // scroll). Only while WE own the page: a game that manages its own touch never
+    // needs this, and a non-passive touchmove listener would only lag its joystick.
+    document.addEventListener('touchmove', function(e){
+      var t = e.target;
+      while (t && t !== document.body){ if (t.id === 'pp-err' || t.id === 'pp-pad') return; t = t.parentNode; }
+      e.preventDefault();
+    }, { passive: false });
+  }
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', setupViewport);
+  else setupViewport();
+  window.addEventListener('orientationchange', function(){ if (_ownViewport) setTimeout(fixViewport, 300); });
 
   // ---- 5. On-screen gamepad for RPG Maker MV/MZ ----
   // Touch-to-move misfires in an iOS standalone webapp; these buttons drive the
