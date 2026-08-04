@@ -134,10 +134,31 @@
   }
   // Serialise decode calls: the shared main-thread decoder has one WASM heap, so
   // overlapping decodeFile() calls (several sounds loading at once) must queue.
+  // CRITICAL: bound every decode with a timeout. If one decodeFile() ever wedges
+  // (a bad/edge-case OGG), an un-timed serialised chain would stall FOREVER, and
+  // every later sound would hang behind it — which, if the game preloads/awaits a
+  // map's audio, shows up as an endless "Loading…" screen (Termina). On timeout we
+  // give up on that sound (→ silence) AND drop the shared decoder so the next call
+  // starts a fresh instance instead of inheriting a wedged WASM heap.
   var _decChain = Promise.resolve();
+  var DECODE_TIMEOUT = 7000;
   function decodeOgg(bytes){
     var run = _decChain.then(function(){
-      return vorbisDecoder().then(function(dec){ return dec.decodeFile(bytes); });
+      return vorbisDecoder().then(function(dec){
+        return new Promise(function(resolve, reject){
+          var settled = false;
+          var t = setTimeout(function(){
+            if (settled) return; settled = true;
+            _vorbis = null;                       // wedged decoder — force a fresh one next time
+            reject(new Error('decode timeout'));
+          }, DECODE_TIMEOUT);
+          Promise.resolve(dec.decodeFile(bytes)).then(function(res){
+            if (settled) return; settled = true; clearTimeout(t); resolve(res);
+          }, function(err){
+            if (settled) return; settled = true; clearTimeout(t); _vorbis = null; reject(err);
+          });
+        });
+      });
     });
     _decChain = run.then(function(){}, function(){});   // keep the chain alive past failures
     return run;
