@@ -94,6 +94,45 @@
     overlay('Unhandled rejection: ' + (r && (r.message || r.stack || r) || 'unknown'));
   });
 
+  // ---- 3b. loading watchdog (diagnostic) ----
+  // When the game hangs on a "Loading…" screen we need to know WHAT it's waiting
+  // for. Track every XHR and image load; if one stays pending too long, surface
+  // its URL in the overlay so we can see the exact stuck resource (or that
+  // nothing is stuck — pointing at memory instead).
+  (function(){
+    var pending = Object.create(null), seq = 0;
+    function shortUrl(u){ u = String(u || ''); return u.length > 80 ? '…' + u.slice(-78) : u; }
+    setInterval(function(){
+      var now = Date.now(), stuck = [];
+      for (var k in pending){ if (now - pending[k].t > 9000) stuck.push(shortUrl(pending[k].u)); }
+      if (stuck.length) overlay('⏳ Stuck loading (>9s):\n' + stuck.slice(0, 5).join('\n'));
+    }, 4000);
+    try {
+      var OX = XMLHttpRequest.prototype.open, SX = XMLHttpRequest.prototype.send;
+      XMLHttpRequest.prototype.open = function(m, url){ try { this.__u = url; } catch(e){} return OX.apply(this, arguments); };
+      XMLHttpRequest.prototype.send = function(){
+        var id = ++seq; pending[id] = { u: this.__u, t: Date.now() };
+        var clr = function(){ delete pending[id]; };
+        try { this.addEventListener('loadend', clr); } catch(e){ this.addEventListener('load', clr); this.addEventListener('error', clr); this.addEventListener('abort', clr); }
+        return SX.apply(this, arguments);
+      };
+    } catch(e){}
+    try {
+      var desc = Object.getOwnPropertyDescriptor(HTMLImageElement.prototype, 'src');
+      if (desc && desc.set){
+        Object.defineProperty(HTMLImageElement.prototype, 'src', {
+          configurable: true, enumerable: desc.enumerable, get: desc.get,
+          set: function(v){
+            var id = ++seq; if (v) { pending[id] = { u: 'img ' + v, t: Date.now() };
+              var clr = function(){ delete pending[id]; };
+              this.addEventListener('load', clr); this.addEventListener('error', clr); }
+            return desc.set.call(this, v);
+          }
+        });
+      }
+    } catch(e){}
+  })();
+
   // ---- 4. audio decode rescue + OGG Vorbis fallback ----
   // iOS Safari can't natively decode OGG Vorbis (RPG Maker MV's default audio
   // format), so BGM/BGS/ME/SE would all come back silent. We wrap decodeAudioData:
