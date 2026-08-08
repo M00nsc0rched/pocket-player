@@ -179,22 +179,47 @@
   // map's audio, shows up as an endless "Loading…" screen (Termina). On timeout we
   // give up on that sound (→ silence) AND drop the shared decoder so the next call
   // starts a fresh instance instead of inheriting a wedged WASM heap.
+  // Diagnostic status line (persistent, top-left). The setInterval watchdog can't
+  // fire while the main thread is blocked by a synchronous WASM decode, so instead
+  // we paint "decoding <size>" BEFORE each decode: if the game freezes showing it,
+  // that decode is the culprit (and its size identifies the file).
+  function audioDbg(msg){
+    try {
+      var el = document.getElementById('pp-adbg');
+      if (!el){ el = document.createElement('div'); el.id = 'pp-adbg';
+        el.style.cssText = 'position:fixed;left:0;top:0;z-index:2147483647;background:rgba(0,0,0,.72);color:#8ff;font:11px/1.4 monospace;padding:2px 6px;pointer-events:none;white-space:pre;';
+        (document.body || document.documentElement).appendChild(el); }
+      el.textContent = msg;
+    } catch(e){}
+  }
+  function yieldPaint(){ return new Promise(function(r){ setTimeout(r, 0); }); }
+
   var _decChain = Promise.resolve();
   var DECODE_TIMEOUT = 7000;
   function decodeOgg(bytes){
+    var mb = (bytes.length / 1048576).toFixed(2);
     var run = _decChain.then(function(){
       return vorbisDecoder().then(function(dec){
-        return new Promise(function(resolve, reject){
-          var settled = false;
-          var t = setTimeout(function(){
-            if (settled) return; settled = true;
-            _vorbis = null;                       // wedged decoder — force a fresh one next time
-            reject(new Error('decode timeout'));
-          }, DECODE_TIMEOUT);
-          Promise.resolve(dec.decodeFile(bytes)).then(function(res){
-            if (settled) return; settled = true; clearTimeout(t); resolve(res);
-          }, function(err){
-            if (settled) return; settled = true; clearTimeout(t); _vorbis = null; reject(err);
+        audioDbg('audio: decoding ' + mb + ' MB…');
+        return yieldPaint().then(function(){   // let the status paint before a (possibly blocking) decode
+          var t0 = Date.now();
+          return new Promise(function(resolve, reject){
+            var settled = false;
+            var t = setTimeout(function(){
+              if (settled) return; settled = true;
+              _vorbis = null;                       // wedged decoder — force a fresh one next time
+              audioDbg('audio: ' + mb + ' MB TIMEOUT');
+              reject(new Error('decode timeout'));
+            }, DECODE_TIMEOUT);
+            Promise.resolve(dec.decodeFile(bytes)).then(function(res){
+              if (settled) return; settled = true; clearTimeout(t);
+              audioDbg('audio: ' + mb + ' MB ok ' + (Date.now() - t0) + 'ms');
+              resolve(res);
+            }, function(err){
+              if (settled) return; settled = true; clearTimeout(t); _vorbis = null;
+              audioDbg('audio: ' + mb + ' MB err');
+              reject(err);
+            });
           });
         });
       });
