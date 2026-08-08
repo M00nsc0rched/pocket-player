@@ -111,9 +111,12 @@
       var OX = XMLHttpRequest.prototype.open, SX = XMLHttpRequest.prototype.send;
       XMLHttpRequest.prototype.open = function(m, url){ try { this.__u = url; } catch(e){} return OX.apply(this, arguments); };
       XMLHttpRequest.prototype.send = function(){
-        var id = ++seq; pending[id] = { u: this.__u, t: Date.now() };
-        var clr = function(){ delete pending[id]; };
-        try { this.addEventListener('loadend', clr); } catch(e){ this.addEventListener('load', clr); this.addEventListener('error', clr); this.addEventListener('abort', clr); }
+        var xhr = this, id = ++seq; pending[id] = { u: xhr.__u, t: Date.now() };
+        xhr.addEventListener('loadend', function(){
+          delete pending[id];
+          var st = 0; try { st = xhr.status; } catch(e){}
+          if (st === 0 || st >= 400) overlay('⚠ request failed (' + (st || 'net') + '):\n' + shortUrl(xhr.__u));
+        });
         return SX.apply(this, arguments);
       };
     } catch(e){}
@@ -123,13 +126,20 @@
         Object.defineProperty(HTMLImageElement.prototype, 'src', {
           configurable: true, enumerable: desc.enumerable, get: desc.get,
           set: function(v){
-            var id = ++seq; if (v) { pending[id] = { u: 'img ' + v, t: Date.now() };
-              var clr = function(){ delete pending[id]; };
-              this.addEventListener('load', clr); this.addEventListener('error', clr); }
+            if (v){ var id = ++seq; pending[id] = { u: 'img ' + v, t: Date.now() };
+              this.addEventListener('load', function(){ delete pending[id]; });
+              this.addEventListener('error', function(){ delete pending[id]; overlay('⚠ image failed:\n' + shortUrl(v)); }); }
             return desc.set.call(this, v);
           }
         });
       }
+    } catch(e){}
+    // <video> problems (iOS Safari can't play WebM movies — a classic scene-hang cause)
+    try {
+      document.addEventListener('error', function(e){
+        var t = e && e.target;
+        if (t && t.tagName === 'VIDEO') overlay('⚠ video failed (iOS can’t play it?):\n' + shortUrl(t.currentSrc || t.src));
+      }, true);
     } catch(e){}
   })();
 
