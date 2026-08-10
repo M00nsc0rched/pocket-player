@@ -143,6 +143,34 @@
     } catch(e){}
   })();
 
+  // ---- 3c. save diagnostic (temporary) ----
+  // The title screen's "Continue" is missing but saves are visible in-game. Report
+  // what the engine sees: whether it thinks any save exists, and the raw save keys
+  // in localStorage — to tell a detection bug (keys present, exists=false) from a
+  // persistence problem (no keys).
+  (function(){
+    var tries = 0;
+    var iv = setInterval(function(){
+      if (typeof DataManager === 'undefined'){ if (++tries > 100) clearInterval(iv); return; }
+      clearInterval(iv);
+      setTimeout(function(){
+        try {
+          var keys = [];
+          for (var i = 0; i < localStorage.length; i++){
+            var k = localStorage.key(i);
+            if (/File|Global|Config|save/i.test(k)) keys.push(k.replace(/^pp:[^:]+:/, ''));
+          }
+          var anyExists;
+          try { anyExists = String(DataManager.isAnySavefileExists()); } catch(e){ anyExists = 'err ' + e.message; }
+          var maxF = 'n/a'; try { maxF = String(DataManager.maxSavefiles()); } catch(e){}
+          overlay('SAVE DIAG\nisAnySavefileExists = ' + anyExists + '\nmaxSavefiles = ' + maxF +
+            '\nsave keys: ' + (keys.length ? keys.join(', ') : '(none)'));
+        } catch(e){ overlay('save diag error: ' + e); }
+      }, 3500);
+    }, 300);
+    setTimeout(function(){ clearInterval(iv); }, 40000);
+  })();
+
   // ---- 4. audio decode rescue + OGG Vorbis fallback ----
   // iOS Safari can't natively decode OGG Vorbis (RPG Maker MV's default audio
   // format), so BGM/BGS/ME/SE would all come back silent. We wrap decodeAudioData:
