@@ -155,16 +155,18 @@
       clearInterval(iv);
       setTimeout(function(){
         try {
-          var keys = [];
+          var curId = (location.pathname.match(/\/g\/([^\/]+)\//) || [])[1];
+          var curPfx = curId ? ('pp:' + curId + ':') : '';
+          var byNs = {};
           for (var i = 0; i < localStorage.length; i++){
             var k = localStorage.key(i);
-            if (/File|Global|Config|save/i.test(k)) keys.push(k.replace(/^pp:[^:]+:/, ''));
+            var m = k.match(/^(pp:[^:]+:)?RPG (File\d+|Global|Config)$/);
+            if (m){ var ns = m[1] || '(unprefixed)'; (byNs[ns] = byNs[ns] || []).push(m[2]); }
           }
-          var anyExists;
-          try { anyExists = String(DataManager.isAnySavefileExists()); } catch(e){ anyExists = 'err ' + e.message; }
-          var maxF = 'n/a'; try { maxF = String(DataManager.maxSavefiles()); } catch(e){}
-          overlay('SAVE DIAG\nisAnySavefileExists = ' + anyExists + '\nmaxSavefiles = ' + maxF +
-            '\nsave keys: ' + (keys.length ? keys.join(', ') : '(none)'));
+          var anyExists; try { anyExists = String(DataManager.isAnySavefileExists()); } catch(e){ anyExists = 'err ' + e.message; }
+          var lines = ['SAVE DIAG', 'current ns: ' + (curPfx || '(none)') + '  exists=' + anyExists];
+          for (var ns in byNs){ lines.push((ns === curPfx ? '★ ' : '  ') + ns + ' → ' + byNs[ns].sort().join(',')); }
+          overlay(lines.join('\n'));
         } catch(e){ overlay('save diag error: ' + e); }
       }, 3500);
     }, 300);
