@@ -5,7 +5,7 @@
 // Game requests are served entirely from cache — the game never touches the
 // network, so it runs fully offline. Each game keeps its own cache and its own
 // URL base, so several games coexist without clobbering each other.
-const SHELL = 'pp-shell-v15';
+const SHELL = 'pp-shell-v16';
 const LEGACY_GAME_CACHE = 'pp-game-v1';
 const SHELL_ASSETS = [
   './',
@@ -55,6 +55,55 @@ async function rangeResponse(res, rangeHeader) {
   });
 }
 
+// A missing image makes RPG Maker's (or a plugin's) preloader wait forever — an
+// endless "Loading…". Instead of 404, hand back a 1x1 transparent image so the
+// scene proceeds (the missing layer/graphic just doesn't show). RPG Maker MV
+// encrypts images as .rpgmvp, so for those we must return the SAME dummy PNG
+// wrapped in MV's encryption (16-byte fake header + first 16 bytes XOR the game's
+// key) — otherwise the engine's decrypt step corrupts it back into an error.
+const TRANSPARENT_PNG_B64 = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAAC0lEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==';
+const MV_ENC_HEADER = new Uint8Array([0x52,0x50,0x47,0x4d,0x56,0x00,0x00,0x00,0x00,0x03,0x01,0x00,0x00,0x00,0x00,0x00]);
+function b64ToBytes(b64) {
+  const bin = atob(b64), u = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) u[i] = bin.charCodeAt(i);
+  return u;
+}
+const _encKeyCache = new Map();  // gameRoot -> Uint8Array key | null
+async function getEncryptionKey(cache, gameRoot) {
+  if (_encKeyCache.has(gameRoot)) return _encKeyCache.get(gameRoot);
+  let key = null;
+  try {
+    const sys = await cache.match(gameRoot + 'data/System.json', { ignoreSearch: true });
+    if (sys) {
+      const hex = (await sys.json()).encryptionKey;
+      if (hex && /^[0-9a-f]+$/i.test(hex) && hex.length >= 2) {
+        key = new Uint8Array(hex.length / 2);
+        for (let i = 0; i < key.length; i++) key[i] = parseInt(hex.substr(i * 2, 2), 16);
+      }
+    }
+  } catch (e) {}
+  _encKeyCache.set(gameRoot, key);
+  return key;
+}
+function mvEncrypt(png, key) {
+  const out = new Uint8Array(MV_ENC_HEADER.length + png.length);
+  out.set(MV_ENC_HEADER, 0);
+  out.set(png, MV_ENC_HEADER.length);
+  for (let i = 0; i < 16 && i < png.length; i++) out[MV_ENC_HEADER.length + i] ^= key[i % key.length];
+  return out;
+}
+async function dummyImageResponse(cache, url, scope) {
+  const png = b64ToBytes(TRANSPARENT_PNG_B64);
+  if (/\.rpgmvp$/i.test(url.pathname)) {
+    const afterScope = url.pathname.slice(scope.pathname.length);
+    const gm = afterScope.match(/^(g\/[^/]+\/|game\/)/);
+    const gameRoot = scope.pathname + (gm ? gm[1] : '');
+    const key = await getEncryptionKey(cache, gameRoot);
+    if (key) return new Response(mvEncrypt(png, key), { status: 200, headers: { 'Content-Type': 'application/octet-stream' } });
+  }
+  return new Response(png, { status: 200, headers: { 'Content-Type': 'image/png' } });
+}
+
 async function serveGame(cacheName, request, url, scope, isIndex) {
   const cache = await caches.open(cacheName);
   let hit = await cache.match(url.pathname, { ignoreSearch: true });
@@ -67,6 +116,11 @@ async function serveGame(cacheName, request, url, scope, isIndex) {
     // recognises the 'OggS' bytes regardless of the extension in the URL.
     const alt = url.pathname.replace(/\.m4a$/i, '.ogg').replace(/\.rpgmvm$/i, '.rpgmvo');
     if (alt !== url.pathname) hit = await cache.match(alt, { ignoreSearch: true });
+  }
+  if (!hit && /\.(rpgmvp|png|jpe?g)$/i.test(url.pathname)) {
+    // Missing image → transparent dummy instead of 404, so a preloader that awaits
+    // it proceeds rather than hanging on an endless "Loading…" screen.
+    return dummyImageResponse(cache, url, scope);
   }
   if (!hit) {
     // opening a game not imported in THIS browser/app copy → back to the player
