@@ -94,55 +94,6 @@
     overlay('Unhandled rejection: ' + (r && (r.message || r.stack || r) || 'unknown'));
   });
 
-  // ---- 3b. loading watchdog (diagnostic) ----
-  // When the game hangs on a "Loading…" screen we need to know WHAT it's waiting
-  // for. Track every XHR and image load; if one stays pending too long, surface
-  // its URL in the overlay so we can see the exact stuck resource (or that
-  // nothing is stuck — pointing at memory instead).
-  (function(){
-    var pending = Object.create(null), seq = 0;
-    function shortUrl(u){ u = String(u || ''); return u.length > 80 ? '…' + u.slice(-78) : u; }
-    setInterval(function(){
-      var now = Date.now(), stuck = [];
-      for (var k in pending){ if (now - pending[k].t > 9000) stuck.push(shortUrl(pending[k].u)); }
-      if (stuck.length) overlay('⏳ Stuck loading (>9s):\n' + stuck.slice(0, 5).join('\n'));
-    }, 4000);
-    try {
-      var OX = XMLHttpRequest.prototype.open, SX = XMLHttpRequest.prototype.send;
-      XMLHttpRequest.prototype.open = function(m, url){ try { this.__u = url; } catch(e){} return OX.apply(this, arguments); };
-      XMLHttpRequest.prototype.send = function(){
-        var xhr = this, id = ++seq; pending[id] = { u: xhr.__u, t: Date.now() };
-        xhr.addEventListener('loadend', function(){
-          delete pending[id];
-          var st = 0; try { st = xhr.status; } catch(e){}
-          if (st === 0 || st >= 400) overlay('⚠ request failed (' + (st || 'net') + '):\n' + shortUrl(xhr.__u));
-        });
-        return SX.apply(this, arguments);
-      };
-    } catch(e){}
-    try {
-      var desc = Object.getOwnPropertyDescriptor(HTMLImageElement.prototype, 'src');
-      if (desc && desc.set){
-        Object.defineProperty(HTMLImageElement.prototype, 'src', {
-          configurable: true, enumerable: desc.enumerable, get: desc.get,
-          set: function(v){
-            if (v){ var id = ++seq; pending[id] = { u: 'img ' + v, t: Date.now() };
-              this.addEventListener('load', function(){ delete pending[id]; });
-              this.addEventListener('error', function(){ delete pending[id]; overlay('⚠ image failed:\n' + shortUrl(v)); }); }
-            return desc.set.call(this, v);
-          }
-        });
-      }
-    } catch(e){}
-    // <video> problems (iOS Safari can't play WebM movies — a classic scene-hang cause)
-    try {
-      document.addEventListener('error', function(e){
-        var t = e && e.target;
-        if (t && t.tagName === 'VIDEO') overlay('⚠ video failed (iOS can’t play it?):\n' + shortUrl(t.currentSrc || t.src));
-      }, true);
-    } catch(e){}
-  })();
-
   // ---- 3c. save-existence fix ----
   // Saves for this game exist in localStorage (RPG File1/2/3), but RPG Global —
   // the summary the title screen's "Continue" checks — is stale/empty, so
@@ -181,8 +132,10 @@
             DataManager.isThisGameFile = function(sid){ try { if (ot(sid)) return true; } catch(e){} return fileExists(sid); };
             DataManager.__ppSaveFix = true;
           }
-          var n = 0; for (var j = 1; j <= m; j++){ if (fileExists(j)) n++; }
-          if (n) overlay('✓ Save fix: ' + n + ' save(s) restored to the menu.\nRestart the game once — "Continue" should now work.');
+          if (changed){
+            var n = 0; for (var j = 1; j <= m; j++){ if (fileExists(j)) n++; }
+            overlay('✓ Save fix: ' + n + ' save(s) restored to the menu.\nRestart the game once — "Continue" should now work.');
+          }
         } catch(e){ overlay('save-fix error: ' + e); }
       }, 1500);
     }, 300);
