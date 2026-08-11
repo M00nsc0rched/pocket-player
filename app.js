@@ -22,7 +22,7 @@
   const LEGACY_CACHE = 'pp-game-v1';
   const GAMES_KEY = 'pp-games-v1';       // the library: array of new games
   // displayed on the page; keep in step with SHELL in sw.js
-  const PP_VERSION = 18;
+  const PP_VERSION = 19;
 
   const $ = id => document.getElementById(id);
   const fmtMB = b => (b / 1048576).toFixed(1) + ' MB';

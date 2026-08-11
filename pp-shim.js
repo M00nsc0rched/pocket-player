@@ -143,32 +143,48 @@
     } catch(e){}
   })();
 
-  // ---- 3c. save diagnostic (temporary) ----
-  // The title screen's "Continue" is missing but saves are visible in-game. Report
-  // what the engine sees: whether it thinks any save exists, and the raw save keys
-  // in localStorage — to tell a detection bug (keys present, exists=false) from a
-  // persistence problem (no keys).
+  // ---- 3c. save-existence fix ----
+  // Saves for this game exist in localStorage (RPG File1/2/3), but RPG Global —
+  // the summary the title screen's "Continue" checks — is stale/empty, so
+  // isAnySavefileExists() returns false and the saves look gone. Rebuild the
+  // global summary from the real save files, and (belt-and-suspenders) make the
+  // existence/ownership checks fall back to the actual files. Then Continue shows
+  // and every save is selectable and loadable.
   (function(){
     var tries = 0;
     var iv = setInterval(function(){
-      if (typeof DataManager === 'undefined'){ if (++tries > 100) clearInterval(iv); return; }
+      if (typeof DataManager === 'undefined' || typeof StorageManager === 'undefined' || !window.$dataSystem){ if (++tries > 200) clearInterval(iv); return; }
       clearInterval(iv);
       setTimeout(function(){
         try {
-          var curId = (location.pathname.match(/\/g\/([^\/]+)\//) || [])[1];
-          var curPfx = curId ? ('pp:' + curId + ':') : '';
-          var byNs = {};
-          for (var i = 0; i < localStorage.length; i++){
-            var k = localStorage.key(i);
-            var m = k.match(/^(pp:[^:]+:)?RPG (File\d+|Global|Config)$/);
-            if (m){ var ns = m[1] || '(unprefixed)'; (byNs[ns] = byNs[ns] || []).push(m[2]); }
+          var maxOf = function(){ try { return DataManager.maxSavefiles(); } catch(e){ return 99; } };
+          var fileExists = function(id){ try { return StorageManager.exists(id); } catch(e){ return false; } };
+          // 1) rebuild RPG Global from the actual save files (fill any gaps)
+          var info; try { info = DataManager.loadGlobalInfo() || []; } catch(e){ info = []; }
+          if (!Array.isArray(info)) info = [];
+          var changed = false, m = maxOf();
+          for (var id = 1; id <= m; id++){
+            if (fileExists(id) && !info[id]){
+              info[id] = { globalId: DataManager._globalId, title: $dataSystem.gameTitle, characters: [], faces: [], playtime: '', timestamp: Date.now() };
+              changed = true;
+            }
           }
-          var anyExists; try { anyExists = String(DataManager.isAnySavefileExists()); } catch(e){ anyExists = 'err ' + e.message; }
-          var lines = ['SAVE DIAG', 'current ns: ' + (curPfx || '(none)') + '  exists=' + anyExists];
-          for (var ns in byNs){ lines.push((ns === curPfx ? '★ ' : '  ') + ns + ' → ' + byNs[ns].sort().join(',')); }
-          overlay(lines.join('\n'));
-        } catch(e){ overlay('save diag error: ' + e); }
-      }, 3500);
+          if (changed){
+            DataManager._globalInfo = info;
+            try { DataManager.saveGlobalInfo(info); } catch(e){ try { DataManager.saveGlobalInfo(); } catch(e2){} }
+          }
+          // 2) fall back to the real files for existence/ownership, so nothing hides them
+          if (!DataManager.__ppSaveFix){
+            var oa = DataManager.isAnySavefileExists.bind(DataManager);
+            DataManager.isAnySavefileExists = function(){ try { if (oa()) return true; } catch(e){} for (var i = 1, mm = maxOf(); i <= mm; i++){ if (fileExists(i)) return true; } return false; };
+            var ot = DataManager.isThisGameFile.bind(DataManager);
+            DataManager.isThisGameFile = function(sid){ try { if (ot(sid)) return true; } catch(e){} return fileExists(sid); };
+            DataManager.__ppSaveFix = true;
+          }
+          var n = 0; for (var j = 1; j <= m; j++){ if (fileExists(j)) n++; }
+          if (n) overlay('✓ Save fix: ' + n + ' save(s) restored to the menu.\nRestart the game once — "Continue" should now work.');
+        } catch(e){ overlay('save-fix error: ' + e); }
+      }, 1500);
     }, 300);
     setTimeout(function(){ clearInterval(iv); }, 40000);
   })();
