@@ -21,8 +21,9 @@
   const LEGACY_META = 'pp-meta-v1';      // the original single-slot game's record
   const LEGACY_CACHE = 'pp-game-v1';
   const GAMES_KEY = 'pp-games-v1';       // the library: array of new games
+  const SETTINGS_KEY = 'pp-settings-v1'; // player settings, read by pp-shim.js in the game
   // displayed on the page; keep in step with SHELL in sw.js
-  const PP_VERSION = 20;
+  const PP_VERSION = 21;
 
   const $ = id => document.getElementById(id);
   const fmtMB = b => (b / 1048576).toFixed(1) + ' MB';
@@ -43,6 +44,24 @@
   }
   function readJSON(key){ try { return JSON.parse(localStorage.getItem(key)); } catch(e){ return null; } }
   function writeJSON(key, v){ try { if (v) localStorage.setItem(key, JSON.stringify(v)); else localStorage.removeItem(key); } catch(e){} }
+
+  // ---- settings ----
+  // Written here, read by pp-shim.js inside the game (same origin, so the game
+  // page sees this very key — the shim reads it before it namespaces localStorage).
+  //   pad:  'auto' → only where the overlay helps (touch/coarse pointer, installed app)
+  //         'on'   → always   ·   'off' → never
+  //   diag: diagonal D-pad corners + diagonal steps for the player character
+  const SETTINGS_DEFAULTS = { pad: 'auto', diag: true };
+  function settings(){
+    const s = readJSON(SETTINGS_KEY) || {};
+    return {
+      pad: ['auto','on','off'].includes(s.pad) ? s.pad : SETTINGS_DEFAULTS.pad,
+      diag: typeof s.diag === 'boolean' ? s.diag : SETTINGS_DEFAULTS.diag,
+    };
+  }
+  function setSetting(key, value){
+    const s = settings(); s[key] = value; writeJSON(SETTINGS_KEY, s); return s;
+  }
 
   // ---- the library ----
   function newGames(){ return readJSON(GAMES_KEY) || []; }
@@ -164,6 +183,23 @@
       } catch(e){}
     }
   }
+  // one segmented control: highlight the chosen button, store the pick on click
+  function wireSeg(id, read, write){
+    const seg = $(id);
+    const paint = () => {
+      const cur = String(read());
+      for (const b of seg.querySelectorAll('button')) b.classList.toggle('sel', b.dataset.v === cur);
+    };
+    for (const b of seg.querySelectorAll('button')){
+      b.addEventListener('click', () => { write(b.dataset.v); paint(); });
+    }
+    paint();
+  }
+  function initSettingsUI(){
+    wireSeg('seg-pad',  () => settings().pad,  v => setSetting('pad', v));
+    wireSeg('seg-diag', () => settings().diag ? 'on' : 'off', v => setSetting('diag', v === 'on'));
+  }
+
   function U(tag, cls, text){ const e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; }
   function status(t){ $('status').textContent = t; }
 
@@ -192,7 +228,7 @@
     refresh();
   }
 
-  window.PP = { importZip, deleteGame, play, allGames, refresh, onPick };
+  window.PP = { importZip, deleteGame, play, allGames, refresh, onPick, settings, setSetting };
 
   window.addEventListener('load', () => {
     $('ver').textContent = 'Pocket Player v' + PP_VERSION;
@@ -203,6 +239,7 @@
     } else if (navigator.standalone === true && !allGames().length){
       status('Installed as an app. Note: the app has its own storage — import your zip HERE (a Safari import does not carry over).');
     }
+    initSettingsUI();
     $('file').addEventListener('change', e => { onPick(e.target.files[0]); e.target.value = ''; });
     $('btn-import').addEventListener('click', () => $('file').click());
     refresh();
