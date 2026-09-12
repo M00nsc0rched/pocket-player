@@ -60,15 +60,32 @@ Touch-to-move often misfires inside an iOS standalone web app, so for RPG Maker
 games the shim adds an **on-screen gamepad** that drives the engine's `Input`
 state directly (bypassing touch coordinates entirely):
 
-- **D-pad** (bottom-left) — move / navigate menus.
+- **D-pad** (bottom-left) — move / navigate menus, with **↖ ↗ ↙ ↘ corners**
+  when diagonal control is on.
 - **A** — OK / confirm / advance dialogue (`ok`).
 - **B** — back / cancel (`escape`).
-- **X** — menu (`escape`; on the map, cancel opens the menu in MV).
+- **X** — dash / run (`shift`, held while pressed).
 
-It appears automatically on touch devices, installed apps, and coarse-pointer
-screens (or force it with `?pad` on the game URL). Buttons are held for
-directions and momentary for actions, with a minimum hold so fast taps still
-register a frame. The engine's own keyboard input keeps working alongside.
+Buttons are held for directions and momentary for actions, with a minimum hold
+so fast taps still register a frame. The engine's own keyboard input keeps
+working alongside.
+
+## Settings (in the player's main menu)
+
+Both live under **Controls** on the player page; they are read when a game
+starts, so a change takes effect the next time you open one.
+
+- **On-screen gamepad** — `Auto` (the default: only on touch/coarse-pointer
+  screens and in the installed app) · `On` (always) · `Off` (never). `?pad` /
+  `?nopad` on the game URL still override either way.
+- **Diagonal control** — adds the four diagonal corners to the D-pad **and**
+  teaches the engine to walk diagonally. Vanilla RPG Maker MV moves the player
+  on `Input.dir4`, which throws one of the two axes away, so the corners alone
+  would only ever step sideways; with this on, `Game_Player.moveByInput` uses
+  `Input.dir8` and takes a real diagonal step (`moveDiagonally`, so walls and
+  blocked corners still stop you — a blocked corner slides along whichever axis
+  is open). It works for two arrow keys held together as well. Turn it off for
+  strict 4-way movement.
 
 Notes:
 - One game slot. Importing another zip replaces the previous game

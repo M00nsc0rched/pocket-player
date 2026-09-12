@@ -10,9 +10,14 @@
 //  4. Never let a failed audio decode kill the game (iOS may lack the OGG
 //     codec) — hand back silence instead.
 //  5. Add an on-screen gamepad (D-pad + A/B/X) that drives RPG Maker's Input
-//     directly, so the game is playable even when touch-to-move misfires.
+//     directly, so the game is playable even when touch-to-move misfires. The
+//     player's main menu decides whether it appears at all, and whether the
+//     D-pad has diagonals.
 //  6. Namespace each library game's localStorage by its id, so games sharing
 //     this origin can't overwrite each other's saves.
+//  7. Optional diagonal movement: vanilla RPG Maker MV walks the player on four
+//     directions only (Input.dir4), so an 8-way pad would be ignored — teach
+//     Game_Player to step diagonally when the option is on.
 (function(){
   'use strict';
 
@@ -23,7 +28,22 @@
   var ROOT = '';
   try { ROOT = ((document.currentScript && document.currentScript.src) || '').replace(/[^\/]*$/, ''); } catch(e){}
 
-  // ---- 0. Per-game save isolation ----
+  // ---- 0. Player settings (chosen in the app's main menu) ----
+  // Read this BEFORE the localStorage namespacing below, so we see the player's
+  // own unprefixed key instead of a per-game copy of it.
+  //   pad:  'auto' (touch/coarse-pointer screens only) | 'on' | 'off'
+  //   diag: true → diagonal D-pad corners + diagonal steps in the engine
+  var settings = { pad: 'auto', diag: true };
+  try {
+    var rawCfg = window.localStorage && localStorage.getItem('pp-settings-v1');
+    if (rawCfg){
+      var cfg = JSON.parse(rawCfg) || {};
+      if (cfg.pad === 'auto' || cfg.pad === 'on' || cfg.pad === 'off') settings.pad = cfg.pad;
+      if (typeof cfg.diag === 'boolean') settings.diag = cfg.diag;
+    }
+  } catch(e){}
+
+  // ---- 0b. Per-game save isolation ----
   // Several games share one origin, so their localStorage saves would collide.
   // A library game runs under g/<id>/ — namespace its localStorage keys by that
   // id. The legacy single-slot game (under game/) stays UNPREFIXED so its
@@ -306,10 +326,20 @@
   // ---- 5. On-screen gamepad for RPG Maker MV/MZ ----
   // Touch-to-move misfires in an iOS standalone webapp; these buttons drive the
   // engine's Input state directly, sidestepping touch coordinates entirely.
-  //   D-pad → up/down/left/right   A → ok (confirm)   B → escape (cancel/menu)
+  //   D-pad → up/down/left/right (+ ↖ ↗ ↙ ↘ when diagonal control is on)
+  //   A → ok (confirm)   B → escape (cancel/menu)
   //   X → shift (dash/run — held down while pressed, like the keyboard Shift)
   function inputState(){ return (window.Input && window.Input._currentState) || null; }
   function setKey(name, on){ var s = inputState(); if (s) s[name] = on; }
+  // One key can be held by two buttons at once (▲ and ↖ both hold 'up'), so count
+  // the holders: releasing one button must not clear a key the other still holds.
+  var held = {};
+  function hold(name, on){
+    var n = (held[name] || 0) + (on ? 1 : -1);
+    if (n < 0) n = 0;
+    held[name] = n;
+    setKey(name, n > 0);
+  }
 
   // wire a button for touch + mouse; onDown/onUp fire once per press, and the
   // touch handler swallows the event so the game's canvas doesn't also see it
@@ -323,8 +353,14 @@
     el.addEventListener('mouseup', up);
     el.addEventListener('mouseleave', function(e){ if (el.classList.contains('on')) up(e); });
   }
-  // directions are held down while pressed
-  function wireHold(el, name){ wire(el, function(){ setKey(name, true); }, function(){ setKey(name, false); }); }
+  // directions (and X/shift) stay down while pressed; a button may hold SEVERAL
+  // keys at once — 'up' + 'left' together is exactly what the engine reads as a
+  // diagonal (Input.dir8)
+  function wireHold(el, names){
+    var list = [].concat(names);
+    wire(el, function(){ list.forEach(function(n){ hold(n, true); }); },
+             function(){ list.forEach(function(n){ hold(n, false); }); });
+  }
   // actions are momentary, but held true for a minimum so a fast tap still registers a frame
   function wirePress(el, name){
     var downAt = 0, t = null;
@@ -348,6 +384,7 @@
         'transition:background .05s,transform .05s;}' +
       '#pp-pad .b.on{background:rgba(208,168,78,.7);transform:scale(.9);}' +
       '#pp-pad .d{width:56px;height:56px;font-size:22px;color:#fff;}' +
+      '#pp-pad .dg{font-size:19px;background:rgba(24,20,36,.24);border-color:rgba(255,255,255,.18);}' +
       '#pp-pad .a{width:64px;height:64px;font-size:24px;}';
     document.head.appendChild(css);
 
@@ -355,13 +392,19 @@
     pad.id = 'pp-pad';
     var SB = 'env(safe-area-inset-bottom)', SL = 'env(safe-area-inset-left)', SR = 'env(safe-area-inset-right)';
 
-    // D-pad, bottom-left
+    // D-pad, bottom-left: a 3x3 grid on a 60px pitch. The corner buttons only
+    // exist when diagonal control is on; each holds BOTH of its keys, so the
+    // engine sees a genuine diagonal rather than two separate taps.
     var dirs = [
-      ['up','▲',62,124], ['left','◀',2,62], ['right','▶',122,62], ['down','▼',62,2],
+      ['up','▲',62,122], ['left','◀',2,62], ['right','▶',122,62], ['down','▼',62,2],
     ];
+    if (settings.diag) dirs.push(
+      [['up','left'],  '↖',   2,122], [['up','right'],  '↗', 122,122],
+      [['down','left'],'↙',   2,  2], [['down','right'],'↘', 122,  2]
+    );
     dirs.forEach(function(d){
       var b = document.createElement('div');
-      b.className = 'b d'; b.textContent = d[1];
+      b.className = 'b d' + (typeof d[0] === 'string' ? '' : ' dg'); b.textContent = d[1];
       b.style.left = 'calc(18px + ' + SL + ' + ' + d[2] + 'px)';
       b.style.bottom = 'calc(22px + ' + SB + ' + ' + d[3] + 'px)';
       wireHold(b, d[0]); pad.appendChild(b);
@@ -387,12 +430,19 @@
   }
   window.__ppBuildPad = buildPad;   // exposed for forcing/testing
 
-  // show only where it helps: a touch/coarse pointer, an installed app, or ?pad
+  // The main menu decides: 'off' never shows it, 'on' always does, and 'auto'
+  // (the default) shows it only where it helps — a touch/coarse pointer or an
+  // installed app. ?nopad / ?pad on the game URL override either way.
   function padWanted(){
     try {
+      var q = location.search || '';
+      if (q.indexOf('nopad') >= 0) return false;
+      if (q.indexOf('pad') >= 0) return true;
+      if (settings.pad === 'off') return false;
+      if (settings.pad === 'on') return true;
       return (window.matchMedia && matchMedia('(pointer: coarse)').matches) ||
         navigator.maxTouchPoints > 0 || 'ontouchstart' in window ||
-        window.navigator.standalone === true || location.search.indexOf('pad') >= 0;
+        window.navigator.standalone === true;
     } catch(e){ return false; }
   }
   var padPoll = setInterval(function(){
@@ -401,4 +451,42 @@
     if (padWanted()) buildPad();
   }, 400);
   setTimeout(function(){ clearInterval(padPoll); }, 40000);
+
+  // ---- 6. Diagonal movement (RPG Maker MV/MZ) ----
+  // Input.dir8 already reports diagonals (two direction keys down at once), but
+  // Game_Player.moveByInput walks on Input.dir4, which drops one of the two axes —
+  // so without this the diagonal buttons would just move the player sideways.
+  // Wrap moveByInput: on a diagonal, step with moveDiagonally() (which checks
+  // canPassDiagonally, so corners and walls still block); if that corner is
+  // blocked, slide along whichever axis is open instead of stopping dead.
+  // Anything that is not a diagonal falls through to the engine's own code, so
+  // touch destinations, followers and vehicles behave exactly as before.
+  (function(){
+    if (!settings.diag) return;
+    var iv = setInterval(function(){
+      if (typeof Game_Player === 'undefined' || !Game_Player.prototype.moveDiagonally) return;
+      clearInterval(iv);
+      if (Game_Player.prototype.__ppDiag) return;   // already wrapped (shim injected twice)
+      var base = Game_Player.prototype.moveByInput;
+      Game_Player.prototype.moveByInput = function(){
+        if (!this.isMoving() && this.canMove()){
+          var d = (window.Input && Input.dir8) || 0;
+          if (d === 1 || d === 3 || d === 7 || d === 9){
+            var horz = (d === 1 || d === 7) ? 4 : 6;
+            var vert = (d === 1 || d === 3) ? 2 : 8;
+            try { if (window.$gameTemp) $gameTemp.clearDestination(); } catch(e){}
+            this.moveDiagonally(horz, vert);
+            if (!this.isMovementSucceeded()){
+              if (this.canPass(this.x, this.y, horz)) this.moveStraight(horz);
+              else if (this.canPass(this.x, this.y, vert)) this.moveStraight(vert);
+            }
+            return;
+          }
+        }
+        base.call(this);
+      };
+      Game_Player.prototype.__ppDiag = true;
+    }, 300);
+    setTimeout(function(){ clearInterval(iv); }, 40000);
+  })();
 })();

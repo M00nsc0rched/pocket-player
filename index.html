@@ -48,6 +48,17 @@
   #status{ margin-top:10px; font-size:12px; color:var(--dim); text-align:center; min-height:16px; word-break:break-word }
   #quota{ margin-top:14px; font-size:11px; color:#4a4060; text-align:center }
   #ver{ margin-top:6px; font-size:11px; color:#4a4060; text-align:center; letter-spacing:1px }
+  .opt{ display:flex; align-items:center; gap:10px; margin-top:10px }
+  .opt:first-of-type{ margin-top:2px }
+  .olabel{ flex:1; min-width:0; font-size:13px; color:var(--ink) }
+  .olabel span{ display:block; font-size:11px; color:var(--dim); margin-top:2px }
+  .seg{ display:flex; flex:none; border:1px solid var(--edge); border-radius:6px; overflow:hidden }
+  .seg button{ width:auto; margin:0; padding:7px 11px; font-size:12px; letter-spacing:1px; border:0;
+    border-left:1px solid var(--edge); border-radius:0; background:#0c0914; color:var(--dim) }
+  .seg button:first-child{ border-left:0 }
+  .seg button:hover{ color:var(--ink) }
+  .seg button.sel{ background:linear-gradient(180deg,#241b33,#191325); color:var(--gold) }
+  .note{ font-size:11px; color:var(--dim); margin-top:10px; line-height:1.5 }
   .steps{ margin-top:18px; font-size:12px; color:var(--dim); line-height:1.7 }
   .steps b{ color:var(--ink) }
 </style>
@@ -64,6 +75,24 @@
     <p>Import a game packaged as a <b>.zip</b> (for RPG Maker MV: the contents of the game's
     <b>www</b> folder). Files are stored in this browser, on this device only — nothing is
     uploaded anywhere. You can keep several games side by side; each has its own saves.</p>
+  </div>
+
+  <div class="box">
+    <h2>Controls</h2>
+    <div class="opt">
+      <div class="olabel">On-screen gamepad<span>The D-pad / A-B-X overlay inside the game</span></div>
+      <div class="seg" id="seg-pad">
+        <button data-v="auto">Auto</button><button data-v="on">On</button><button data-v="off">Off</button>
+      </div>
+    </div>
+    <div class="opt">
+      <div class="olabel">Diagonal control<span>↖ ↗ ↙ ↘ corners, and the player walks diagonally</span></div>
+      <div class="seg" id="seg-diag">
+        <button data-v="on">On</button><button data-v="off">Off</button>
+      </div>
+    </div>
+    <p class="note"><b>Auto</b> shows the gamepad only on touch screens and in the installed app.
+    Changes apply the next time you open a game.</p>
   </div>
 
   <button id="btn-import" class="primary">＋ &nbsp;Import a game (.zip)</button>
