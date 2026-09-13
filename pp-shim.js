@@ -23,6 +23,17 @@
   var ROOT = '';
   try { ROOT = ((document.currentScript && document.currentScript.src) || '').replace(/[^\/]*$/, ''); } catch(e){}
 
+  // ---- Player-wide UI options (set on the launcher home screen) ----
+  // These live under GLOBAL (un-namespaced) localStorage keys shared with the
+  // launcher. §0 below rewrites Storage.prototype to prefix every key with the
+  // game's id — so we capture the RAW methods now and always read/write these
+  // options through them, bypassing the per-game namespace.
+  var _rawGet = null, _rawSet = null;
+  try { _rawGet = Storage.prototype.getItem; _rawSet = Storage.prototype.setItem; } catch(e){}
+  function optGet(k){ try { return _rawGet ? _rawGet.call(window.localStorage, k) : localStorage.getItem(k); } catch(e){ return null; } }
+  var OPT_PAD  = function(){ return optGet('pp-onscreen-controls') !== '0'; };  // default ON
+  var OPT_DIAG = function(){ return optGet('pp-diagonal-move') === '1'; };      // default OFF
+
   // ---- 0. Per-game save isolation ----
   // Several games share one origin, so their localStorage saves would collide.
   // A library game runs under g/<id>/ — namespace its localStorage keys by that
@@ -325,6 +336,13 @@
   }
   // directions are held down while pressed
   function wireHold(el, name){ wire(el, function(){ setKey(name, true); }, function(){ setKey(name, false); }); }
+  // a diagonal button holds TWO directions at once (up+right, …) so the engine
+  // reads Input.dir8 as a diagonal
+  function wireHoldN(el, names){
+    wire(el,
+      function(){ names.forEach(function(n){ setKey(n, true); }); },
+      function(){ names.forEach(function(n){ setKey(n, false); }); });
+  }
   // actions are momentary, but held true for a minimum so a fast tap still registers a frame
   function wirePress(el, name){
     var downAt = 0, t = null;
@@ -348,23 +366,38 @@
         'transition:background .05s,transform .05s;}' +
       '#pp-pad .b.on{background:rgba(208,168,78,.7);transform:scale(.9);}' +
       '#pp-pad .d{width:56px;height:56px;font-size:22px;color:#fff;}' +
-      '#pp-pad .a{width:64px;height:64px;font-size:24px;}';
+      '#pp-pad .d.diag{width:52px;height:52px;font-size:18px;color:#d7cdea;' +
+        'background:rgba(24,20,36,.24);border-color:rgba(255,255,255,.18);}' +
+      '#pp-pad .a{width:64px;height:64px;font-size:24px;}' +
+      // the ⛶ toggle stays visible; it hides/shows only the direction & action buttons
+      '#pp-pad .tog{width:38px;height:38px;font-size:17px;border-radius:9px;color:#d0a84e;' +
+        'background:rgba(18,13,28,.5);border:1px solid rgba(208,168,78,.5);}' +
+      '#pp-pad.hidden .b:not(.tog){display:none;}';
     document.head.appendChild(css);
 
     var pad = document.createElement('div');
     pad.id = 'pp-pad';
     var SB = 'env(safe-area-inset-bottom)', SL = 'env(safe-area-inset-left)', SR = 'env(safe-area-inset-right)';
 
-    // D-pad, bottom-left
+    // D-pad, bottom-left. A 3×3 grid (60px steps): edges are the 4 straight
+    // directions; when diagonal movement is on we also fill the 4 corners with
+    // two-direction buttons, giving a full 8-way pad.
     var dirs = [
       ['up','▲',62,124], ['left','◀',2,62], ['right','▶',122,62], ['down','▼',62,2],
     ];
+    if (OPT_DIAG()){
+      dirs.push(
+        ['up-left','↖',2,124,['up','left']],   ['up-right','↗',122,124,['up','right']],
+        ['down-left','↙',2,2,['down','left']], ['down-right','↘',122,2,['down','right']]
+      );
+    }
     dirs.forEach(function(d){
       var b = document.createElement('div');
-      b.className = 'b d'; b.textContent = d[1];
+      b.className = 'b d' + (d[4] ? ' diag' : ''); b.textContent = d[1];
       b.style.left = 'calc(18px + ' + SL + ' + ' + d[2] + 'px)';
       b.style.bottom = 'calc(22px + ' + SB + ' + ' + d[3] + 'px)';
-      wireHold(b, d[0]); pad.appendChild(b);
+      if (d[4]) wireHoldN(b, d[4]); else wireHold(b, d[0]);
+      pad.appendChild(b);
     });
 
     // A / B / X cluster, bottom-right (X top · A middle · B bottom, per the sketch).
@@ -383,13 +416,27 @@
       (a[5] === 'hold' ? wireHold : wirePress)(b, a[1]); pad.appendChild(b);
     });
 
+    // ⛶ quick-hide toggle (top-left, above the D-pad) — like the Diablo pad. It
+    // only shows/hides the buttons for this session (e.g. to see a cutscene); the
+    // persistent on/off switch lives on the launcher home screen.
+    var tog = document.createElement('div');
+    tog.className = 'b tog'; tog.textContent = '⛶'; tog.title = 'Hide / show controls';
+    tog.style.left = 'calc(18px + ' + SL + ' + 2px)';
+    tog.style.bottom = 'calc(22px + ' + SB + ' + 190px)';
+    var toggle = function(e){ if (e){ e.preventDefault(); e.stopPropagation(); } pad.classList.toggle('hidden'); };
+    tog.addEventListener('touchstart', toggle, { passive:false });
+    tog.addEventListener('click', toggle);
+    pad.appendChild(tog);
+
     (document.body || document.documentElement).appendChild(pad);
   }
   window.__ppBuildPad = buildPad;   // exposed for forcing/testing
 
   // show only where it helps: a touch/coarse pointer, an installed app, or ?pad
+  // — unless the launcher's "On-screen controls" switch is explicitly OFF.
   function padWanted(){
     try {
+      if (!OPT_PAD()) return false;
       return (window.matchMedia && matchMedia('(pointer: coarse)').matches) ||
         navigator.maxTouchPoints > 0 || 'ontouchstart' in window ||
         window.navigator.standalone === true || location.search.indexOf('pad') >= 0;
@@ -401,4 +448,40 @@
     if (padWanted()) buildPad();
   }, 400);
   setTimeout(function(){ clearInterval(padPoll); }, 40000);
+
+  // ---- 6. Optional diagonal (8-way) movement ----
+  // RPG Maker walks 4-directionally by default (Game_Player.getInputDirection →
+  // Input.dir4). When the launcher's "Diagonal movement" switch is on, read the
+  // 8-way Input.dir8 and take a real diagonal step (moveDiagonally) — with a
+  // wall-slide so a blocked corner still slides along the open axis. Followers
+  // are advanced exactly as Game_Player.moveStraight does, so the party keeps up.
+  function applyDiagonal(){
+    if (typeof Game_Player === 'undefined' || typeof Game_CharacterBase === 'undefined') return false;
+    if (Game_Player.__ppDiag) return true;
+    Game_Player.__ppDiag = true;
+    Game_Player.prototype.getInputDirection = function(){ return Input.dir8; };
+    var _execMove = Game_Player.prototype.executeMove;
+    Game_Player.prototype.executeMove = function(direction){
+      if (direction === 1 || direction === 3 || direction === 7 || direction === 9){
+        var horz = (direction === 1 || direction === 7) ? 4 : 6;
+        var vert = (direction === 1 || direction === 3) ? 2 : 8;
+        this.moveDiagonally(horz, vert);
+      } else {
+        _execMove.call(this, direction);
+      }
+    };
+    Game_Player.prototype.moveDiagonally = function(horz, vert){
+      if (this.canPassDiagonally(this._x, this._y, horz, vert)) this._followers.updateMove();
+      Game_CharacterBase.prototype.moveDiagonally.call(this, horz, vert);
+      if (!this.isMovementSucceeded()){            // corner blocked → slide along the open axis
+        if (this.canPass(this._x, this._y, horz)) this.moveStraight(horz);
+        else if (this.canPass(this._x, this._y, vert)) this.moveStraight(vert);
+      }
+    };
+    return true;
+  }
+  if (OPT_DIAG()){
+    var diagPoll = setInterval(function(){ if (applyDiagonal()) clearInterval(diagPoll); }, 300);
+    setTimeout(function(){ clearInterval(diagPoll); }, 40000);
+  }
 })();

@@ -50,6 +50,19 @@
   #ver{ margin-top:6px; font-size:11px; color:#4a4060; text-align:center; letter-spacing:1px }
   .steps{ margin-top:18px; font-size:12px; color:var(--dim); line-height:1.7 }
   .steps b{ color:var(--ink) }
+  /* on-screen control settings (read by the in-game shim) */
+  .opt{ display:flex; align-items:center; justify-content:space-between; gap:12px; padding:9px 2px; cursor:pointer }
+  .opt + .opt{ border-top:1px solid var(--edge) }
+  .opt > span:first-child{ font-size:14px; color:var(--ink); display:flex; flex-direction:column }
+  .opt small{ color:var(--dim); font-size:11px; margin-top:2px; letter-spacing:0 }
+  .opt input{ position:absolute; opacity:0; pointer-events:none }
+  .opt .sw{ flex:none; width:46px; height:26px; border-radius:14px; background:#000; border:1px solid var(--edge);
+    position:relative; transition:background .15s,border-color .15s }
+  .opt .sw::after{ content:''; position:absolute; top:2px; left:2px; width:20px; height:20px; border-radius:50%;
+    background:var(--dim); transition:transform .15s,background .15s }
+  .opt input:checked ~ .sw{ background:linear-gradient(180deg,#5a4420,var(--gold)); border-color:var(--gold) }
+  .opt input:checked ~ .sw::after{ transform:translateX(20px); background:#fff }
+  .opt input:focus-visible ~ .sw{ outline:2px solid var(--gold); outline-offset:2px }
 </style>
 </head>
 <body>
@@ -73,6 +86,21 @@
   <div id="status"></div>
   <div id="quota"></div>
   <div id="ver"></div>
+
+  <div class="box" id="opts">
+    <h2>Touch controls</h2>
+    <label class="opt">
+      <span>On-screen controls<small>Show the D-pad &amp; buttons in games</small></span>
+      <input type="checkbox" id="opt-pad">
+      <span class="sw"></span>
+    </label>
+    <label class="opt">
+      <span>Diagonal movement<small>8-way D-pad &amp; diagonal walking</small></span>
+      <input type="checkbox" id="opt-diag">
+      <span class="sw"></span>
+    </label>
+    <p style="margin-top:8px">Changes apply next time a game is opened.</p>
+  </div>
 
   <div class="steps">
     <b>iPhone — the order matters:</b><br>

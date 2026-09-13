@@ -22,7 +22,7 @@
   const LEGACY_CACHE = 'pp-game-v1';
   const GAMES_KEY = 'pp-games-v1';       // the library: array of new games
   // displayed on the page; keep in step with SHELL in sw.js
-  const PP_VERSION = 20;
+  const PP_VERSION = 21;
 
   const $ = id => document.getElementById(id);
   const fmtMB = b => (b / 1048576).toFixed(1) + ' MB';
@@ -192,9 +192,23 @@
     refresh();
   }
 
+  // ---- on-screen control settings ----
+  // Global (un-namespaced) prefs the in-game shim reads: whether to show the
+  // touch gamepad, and whether it's 8-way with diagonal walking. Defaults:
+  // controls ON (unset ≠ '0'), diagonal OFF (only when '1').
+  function initOpts(){
+    const pad = $('opt-pad'), diag = $('opt-diag');
+    if (!pad || !diag) return;
+    pad.checked  = localStorage.getItem('pp-onscreen-controls') !== '0';
+    diag.checked = localStorage.getItem('pp-diagonal-move') === '1';
+    pad.addEventListener('change', () => { localStorage.setItem('pp-onscreen-controls', pad.checked ? '1' : '0'); });
+    diag.addEventListener('change', () => { localStorage.setItem('pp-diagonal-move', diag.checked ? '1' : '0'); });
+  }
+
   window.PP = { importZip, deleteGame, play, allGames, refresh, onPick };
 
   window.addEventListener('load', () => {
+    initOpts();
     $('ver').textContent = 'Pocket Player v' + PP_VERSION;
     if ('serviceWorker' in navigator && window.isSecureContext)
       navigator.serviceWorker.register('sw.js').catch(()=>{});
