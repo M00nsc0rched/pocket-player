@@ -75,12 +75,13 @@
   <div id="empty" class="box">
     <h2>No games yet</h2>
     <p>Import a game packaged as a <b>.zip</b> (for RPG Maker MV: the contents of the game's
-    <b>www</b> folder). Files are stored in this browser, on this device only — nothing is
+    <b>www</b> folder), or a <b>Nintendo 64</b> ROM (<b>.z64 / .n64 / .v64</b>, zipped or not).
+    Files are stored in this browser, on this device only — nothing is
     uploaded anywhere. You can keep several games side by side; each has its own saves.</p>
   </div>
 
-  <button id="btn-import" class="primary">＋ &nbsp;Import a game (.zip)</button>
-  <input type="file" id="file" accept=".zip,application/zip,application/x-zip-compressed" style="display:none">
+  <button id="btn-import" class="primary">＋ &nbsp;Import a game (.zip or N64 ROM)</button>
+  <input type="file" id="file" accept=".zip,application/zip,application/x-zip-compressed,.z64,.n64,.v64" style="display:none">
 
   <div id="progress-wrap"><div id="progress-fill"></div></div>
   <div id="status"></div>

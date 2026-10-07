@@ -1,11 +1,12 @@
 // Pocket Player service worker.
-// Caches: the app shell (this tool) + one cache per imported game.
+// Caches: the app shell (this tool) + one cache per imported game + the N64 emulator.
 //   legacy single-slot game → cache 'pp-game-v1', served under 'game/…'
 //   new library games        → cache 'pp-game-<id>', served under 'g/<id>/…'
+//   N64 emulator             → cache 'pp-emu-…', served under 'emu/…'
 // Game requests are served entirely from cache — the game never touches the
 // network, so it runs fully offline. Each game keeps its own cache and its own
 // URL base, so several games coexist without clobbering each other.
-const SHELL = 'pp-shell-v21';
+const SHELL = 'pp-shell-v22';
 const LEGACY_GAME_CACHE = 'pp-game-v1';
 const SHELL_ASSETS = [
   './',
@@ -14,24 +15,76 @@ const SHELL_ASSETS = [
   './pp-shim.js',
   './ogg-vorbis-decoder.min.js',
   './fflate.min.js',
+  './n64.html',
+  './n64.js',
   './manifest.json',
   './icon-180.png',
   './icon-192.png',
   './icon-512.png',
 ];
+// The vendored N64 emulator (EmulatorJS 4.2.3, see emu/ejs-4.2.3/SOURCES.md) lives
+// in its OWN cache named after its version: shell bumps leave it alone, and a new
+// emulator version gets a new folder and a new cache (the old one is swept on
+// activate). Upstream would fall back to cdn.emulatorjs.org for a missing core, so
+// every file it can ask for must be in here.
+const EMU = 'pp-emu-ejs-4.2.3-r1';
+const EMU_ASSETS = [
+  './emu/ejs-4.2.3/loader.js',
+  './emu/ejs-4.2.3/emulator.min.js',
+  './emu/ejs-4.2.3/emulator.min.css',
+  './emu/ejs-4.2.3/compression/extractzip.js',
+  './emu/ejs-4.2.3/cores/reports/mupen64plus_next.json',
+  './emu/ejs-4.2.3/cores/reports/parallel_n64.json',
+  './emu/ejs-4.2.3/cores/mupen64plus_next-wasm.data',
+  './emu/ejs-4.2.3/cores/mupen64plus_next-legacy-wasm.data',
+  './emu/ejs-4.2.3/cores/parallel_n64-legacy-wasm.data',
+];
+
+// Download whatever part of the emulator is not cached yet. Resolves (never
+// rejects) with { ready, missing } so callers can tell the user what is absent.
+async function fillEmu() {
+  const cache = await caches.open(EMU);
+  const missing = [];
+  for (const asset of EMU_ASSETS) {
+    const url = new URL(asset, self.registration.scope).href;
+    if (await cache.match(url)) continue;
+    try {
+      const res = await fetch(url);
+      if (res.ok) { await cache.put(url, res); continue; }
+    } catch (e) {}
+    missing.push(asset);
+  }
+  return { ready: !missing.length, missing };
+}
 
 self.addEventListener('install', (e) => {
-  e.waitUntil(caches.open(SHELL).then(c => c.addAll(SHELL_ASSETS)).then(() => self.skipWaiting()));
+  e.waitUntil(
+    caches.open(SHELL).then(c => c.addAll(SHELL_ASSETS))
+      // best-effort: a network hiccup on the emulator's few MB must not block a
+      // shell update — the player and the import complete it later via fillEmu
+      .then(() => fillEmu().catch(() => {}))
+      .then(() => self.skipWaiting())
+  );
 });
 
 self.addEventListener('activate', (e) => {
-  // only sweep away stale SHELL caches — every pp-game-* cache is a user's
-  // installed game and must survive tool updates
+  // only sweep away stale SHELL and EMU caches — every pp-game-* cache is a
+  // user's installed game and must survive tool updates
   e.waitUntil(
     caches.keys()
-      .then(keys => Promise.all(keys.filter(k => k.startsWith('pp-shell-') && k !== SHELL).map(k => caches.delete(k))))
+      .then(keys => Promise.all(keys.filter(k =>
+        (k.startsWith('pp-shell-') && k !== SHELL) || (k.startsWith('pp-emu-') && k !== EMU)
+      ).map(k => caches.delete(k))))
       .then(() => self.clients.claim())
   );
+});
+
+// { type: 'pp-emu' } + a MessagePort → make sure the emulator is cached for
+// offline play and answer { ready, missing } on the port.
+self.addEventListener('message', (e) => {
+  if (!e.data || e.data.type !== 'pp-emu') return;
+  const port = e.ports && e.ports[0];
+  e.waitUntil(fillEmu().then(r => { if (port) port.postMessage(r); }));
 });
 
 // iOS media elements demand Range responses; Cache API ignores Range headers,
@@ -104,6 +157,11 @@ async function dummyImageResponse(cache, url, scope) {
   return new Response(png, { status: 200, headers: { 'Content-Type': 'image/png' } });
 }
 
+// a HEAD answer for a cached entry: same status and headers, no body
+function headOf(res) {
+  return new Response(null, { status: res.status, headers: res.headers });
+}
+
 async function serveGame(cacheName, request, url, scope, isIndex) {
   const cache = await caches.open(cacheName);
   let hit = await cache.match(url.pathname, { ignoreSearch: true });
@@ -127,6 +185,7 @@ async function serveGame(cacheName, request, url, scope, isIndex) {
     if (request.mode === 'navigate') return Response.redirect(scope.pathname + '?nogame=1', 302);
     return new Response('not in the imported game: ' + url.pathname, { status: 404 });
   }
+  if (request.method === 'HEAD') return headOf(hit);
   // inject the shim (readable errors, audio rescue, gamepad, save isolation)
   if (isIndex) {
     const text = await hit.text();
@@ -139,13 +198,35 @@ async function serveGame(cacheName, request, url, scope, isIndex) {
   return hit;
 }
 
+// emulator files: cache-first from the EMU cache, filled from the network on a
+// miss (never into the shell cache, which is thrown away on every shell bump)
+async function serveEmu(request, url) {
+  const cache = await caches.open(EMU);
+  let hit = await cache.match(url.pathname, { ignoreSearch: true });
+  if (!hit) {
+    try {
+      hit = await fetch(url.href);
+      if (hit.ok) await cache.put(url.pathname, hit.clone());
+    } catch (err) {
+      return new Response('emulator file not available offline: ' + url.pathname, { status: 504 });
+    }
+  }
+  return request.method === 'HEAD' ? headOf(hit) : hit;
+}
+
 self.addEventListener('fetch', (e) => {
-  if (e.request.method !== 'GET') return;
+  const method = e.request.method;
+  if (method !== 'GET' && method !== 'HEAD') return;
   const url = new URL(e.request.url);
   const scope = new URL(self.registration.scope);
   if (url.origin !== scope.origin) return;
   const rel = url.pathname.slice(scope.pathname.length);   // path under the app scope
 
+  // the vendored N64 emulator
+  if (rel.startsWith('emu/')) {
+    e.respondWith(serveEmu(e.request, url));
+    return;
+  }
   // legacy single-slot game (the original install)
   if (rel.startsWith('game/')) {
     e.respondWith(serveGame(LEGACY_GAME_CACHE, e.request, url, scope, rel.endsWith('/index.html')));
@@ -157,12 +238,15 @@ self.addEventListener('fetch', (e) => {
     e.respondWith(serveGame('pp-game-' + id, e.request, url, scope, rel.endsWith('/index.html')));
     return;
   }
-  // app shell — cache-first, fill from network
+  if (method !== 'GET') return;
+  // app shell — cache-first, fill from network (only with good responses)
   e.respondWith(
     caches.match(e.request, { ignoreSearch: true }).then(hit =>
       hit || fetch(e.request).then(res => {
-        const copy = res.clone();
-        caches.open(SHELL).then(c => c.put(e.request, copy));
+        if (res.ok) {
+          const copy = res.clone();
+          caches.open(SHELL).then(c => c.put(e.request, copy));
+        }
         return res;
       })
     )
